@@ -1,0 +1,14 @@
+@media print {
+    body * {
+      visibility: hidden;
+    }
+    #printable-modal-content, #printable-modal-content * {
+      visibility: visible;
+    }
+    #printable-modal-content {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+    }
+  }

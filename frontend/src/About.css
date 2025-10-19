@@ -1,0 +1,19 @@
+.about-page {
+    font-family: Arial, sans-serif;
+  }
+  
+  .about-page h1 {
+    font-size: 2.5rem;
+    margin-bottom: 20px;
+  }
+  
+  .about-page h2 {
+    font-size: 2rem;
+    margin-top: 30px;
+    margin-bottom: 10px;
+  }
+  
+  .about-page p {
+    font-size: 1.2rem;
+    line-height: 1.6;
+  }

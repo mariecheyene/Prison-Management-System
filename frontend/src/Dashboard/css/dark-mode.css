@@ -1,0 +1,109 @@
+/* ===== DARK THEME ===== */
+body.dark {
+  background-color: #121212 !important;
+  color: #e0e0e0 !important;
+}
+
+/* Dark containers */
+body.dark .container,
+body.dark .card,
+body.dark .modal-content {
+  background-color: #1e1e1e !important;
+  color: #e0e0e0 !important;
+  border-color: #444 !important;
+}
+
+/* Dark tables */
+body.dark .table {
+  background-color: #1e1e1e !important;
+  color: #e0e0e0 !important;
+}
+
+body.dark .table th,
+body.dark .table td {
+  background-color: #1e1e1e !important;
+  color: #e0e0e0 !important;
+  border-color: #444 !important;
+}
+
+body.dark .table-striped tbody tr:nth-of-type(odd) {
+  background-color: #2d2d2d !important;
+}
+
+/* Fix buttons */
+body.dark .btn {
+  color: white !important;
+}
+
+body.dark .btn-primary {
+  background-color: #0d6efd !important;
+  border-color: #0d6efd !important;
+}
+
+body.dark .btn-warning {
+  background-color: #ffc107 !important;
+  color: #000 !important;
+}
+
+body.dark .btn-danger {
+  background-color: #dc3545 !important;
+}
+
+/* Fix inputs */
+body.dark .form-control,
+body.dark .form-select {
+  background-color: #2d2d2d !important;
+  color: #e0e0e0 !important;
+  border-color: #444 !important;
+}
+
+/* Fix header */
+body.dark .header {
+  background-color: #1a3a5a !important;
+  color: white !important;
+}
+
+/* Force all text visibility */
+body.dark *:not(.btn-warning) {
+  color: #e0e0e0 !important;
+}
+/* Fix: Card body text visibility */
+body.dark .card-body {
+  color: #ffffff !important; /* Force white text */
+}
+
+/* Fix: Search bar text visibility */
+body.dark .search-container input,
+body.dark .search-container select,
+body.dark .form-control {
+  color: #ffffff !important; /* Force white text */
+}
+
+body.dark ::placeholder {
+  color: #b0b0b0 !important; /* Slightly brighter placeholder */
+}
+/* ===== Add this to your dark-mode.css ===== */
+body.dark .card-title {
+  color: #000000 !important; /* Pure black title text */
+}
+
+/* ===== Add to dark-mode.css ===== */
+body.dark .card i,               /* For FontAwesome/icons */
+body.dark .card .material-icons, /* For Material Icons */
+body.dark .card svg {            /* For SVG icons */
+  color: #000000 !important;
+  fill: #000000 !important;      /* For SVG fill */
+}
+/* Button text */
+body.dark .btn {
+  color: #000000 !important;
+}
+
+/* Button icons (covers all icon types) */
+body.dark .btn i,
+body.dark .btn .material-icons,
+body.dark .btn svg,
+body.dark .btn img {
+  color: #000000 !important;
+  fill: #000000 !important;
+}

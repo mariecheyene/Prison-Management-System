@@ -75,21 +75,26 @@ const RecordVisits = () => {
   }, [visits, startDate, endDate, searchQuery, searchBy]);
 
   const fetchVisits = async () => {
-    setIsLoading(true);
-    try {
-      const response = await axios.get(`${API_BASE}/visitors`);
-      // Filter visitors who have time tracking data (either timeIn or timeOut)
-      const visitorsWithTimeTracking = response.data.filter(visit => 
-        visit.timeIn || visit.timeOut || visit.dateVisited || visit.lastVisitDate
-      );
-      setVisits(visitorsWithTimeTracking);
-    } catch (error) {
-      console.error("Error fetching visits:", error);
-      toast.error("Failed to fetch visit records");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  setIsLoading(true);
+  try {
+    const response = await axios.get(`${API_BASE}/visitors`);
+    // Remove the filtering - show ALL visitors
+    setVisits(response.data);
+    
+    // Sort by most recent time in (dateVisited descending, then timeIn descending)
+    const sortedVisits = response.data.sort((a, b) => {
+      const dateA = a.dateVisited ? new Date(a.dateVisited) : new Date(a.createdAt);
+      const dateB = b.dateVisited ? new Date(b.dateVisited) : new Date(b.createdAt);
+      return dateB - dateA; // Most recent first
+    });
+    setVisits(sortedVisits);
+  } catch (error) {
+    console.error("Error fetching visits:", error);
+    toast.error("Failed to fetch visit records");
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const fetchInmates = async () => {
     try {

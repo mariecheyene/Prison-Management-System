@@ -23,7 +23,7 @@ import {
   XCircle
 } from 'react-feather';
 
-const RecordVisits = () => {
+const ViewRecordVisits = () => {
   const [visits, setVisits] = useState([]);
   const [filteredVisits, setFilteredVisits] = useState([]);
   const [violators, setViolators] = useState([]);
@@ -1028,4 +1028,4 @@ const handleResetTimeRecords = async (visitorId) => {
   );
 };
 
-export default RecordVisits;
+export default ViewRecordVisits;

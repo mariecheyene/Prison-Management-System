@@ -80,13 +80,15 @@ const Admin = () => {
   return (
     <div className="dashboard">
       <div className={`sidebar ${isSidebarClosed ? "close" : ""}`}>
-        <NavLink to="/admin/dashboard" className="logo">
-          <i className="bx bx-shield-quarter"></i>
-          <div className="logo-name">
-            <span>Prison Management</span>
-            {getAccessBadge()}
-          </div>
-        </NavLink>
+  <NavLink to="/admin/dashboard" className="logo">
+    <i className="bx bx-shield-quarter"></i>
+    <div className="logo-name">
+      <span>Prison Management</span>
+      <div className="access-badge-container">
+        {getAccessBadge()}
+      </div>
+    </div>
+  </NavLink>
         <ul className="side-menu">
           {[
             { name: "Dashboard", icon: "bx bxs-dashboard", path: "/admin/dashboard" },

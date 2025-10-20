@@ -1086,6 +1086,224 @@ app.get("/visitors-debug/timers", async (req, res) => {
 });
 
 // ======================
+// GUEST ENDPOINTS
+// ======================
+
+// CREATE GUEST
+app.post("/guests", 
+  upload.single('photo'),
+  async (req, res) => {
+    try {
+      const seq = await autoIncrement('guestId');
+      const id = `GST${seq}`;
+
+      console.log('Creating new guest with data:', req.body);
+
+      const guestData = {
+        ...req.body,
+        id,
+        dateOfBirth: req.body.dateOfBirth ? new Date(req.body.dateOfBirth) : null,
+        hasTimedIn: false,
+        hasTimedOut: false,
+        timeIn: null,
+        timeOut: null,
+        dateVisited: null,
+        lastVisitDate: null,
+        status: req.body.status || 'pending'
+      };
+
+      if (req.file) {
+        guestData.photo = req.file.filename;
+      }
+
+      const qrData = {
+        id,
+        lastName: guestData.lastName,
+        firstName: guestData.firstName,
+        middleName: guestData.middleName,
+        extension: guestData.extension,
+        visitPurpose: guestData.visitPurpose,
+        type: 'guest'
+      };
+      guestData.qrCode = await generateQRCode(qrData);
+
+      const guest = new Guest(guestData);
+      await guest.save();
+
+      const guestWithFullName = {
+        ...guest.toObject(),
+        fullName: guest.fullName
+      };
+
+      res.status(201).json({ 
+        message: "Guest created successfully", 
+        guest: guestWithFullName 
+      });
+    } catch (error) {
+      console.error("Guest creation error:", error);
+      
+      if (error.code === 11000) {
+        return res.status(409).json({ message: "Guest ID already exists" });
+      }
+      
+      if (error.name === 'ValidationError') {
+        return res.status(400).json({ message: "Validation error", error: error.message });
+      }
+      
+      res.status(500).json({ message: "Failed to create guest", error: error.message });
+    }
+  }
+);
+
+// GET ALL GUESTS
+app.get("/guests", async (req, res) => {
+  try {
+    const guests = await Guest.find();
+    const guestsWithFullName = guests.map(guest => ({
+      ...guest.toObject(),
+      fullName: guest.fullName
+    }));
+    res.json(guestsWithFullName);
+  } catch (error) {
+    res.status(500).json({ message: "Fetch failed", error: error.message });
+  }
+});
+
+// GET SINGLE GUEST
+app.get("/guests/:id", async (req, res) => {
+  try {
+    const guest = await Guest.findOne({ id: req.params.id });
+    if (!guest) return res.status(404).json({ message: "Guest not found" });
+    
+    const guestWithFullName = {
+      ...guest.toObject(),
+      fullName: guest.fullName
+    };
+    res.json(guestWithFullName);
+  } catch (error) {
+    res.status(500).json({ message: "Fetch failed", error: error.message });
+  }
+});
+
+// UPDATE GUEST
+app.put("/guests/:id", 
+  upload.single('photo'),
+  async (req, res) => {
+    try {
+      const updateData = { ...req.body };
+      if (req.file) updateData.photo = req.file.filename;
+
+      const guest = await Guest.findOne({ id: req.params.id });
+      if (!guest) return res.status(404).json({ message: "Guest not found" });
+
+      const updatedGuest = await Guest.findOneAndUpdate(
+        { id: req.params.id },
+        updateData,
+        { new: true, runValidators: true }
+      );
+      
+      const guestWithFullName = {
+        ...updatedGuest.toObject(),
+        fullName: updatedGuest.fullName
+      };
+      res.json(guestWithFullName);
+    } catch (error) {
+      console.error("Error updating guest:", error);
+      res.status(500).json({ message: "Update failed", error: error.message });
+    }
+  }
+);
+
+// DELETE GUEST
+app.delete("/guests/:id", async (req, res) => {
+  try {
+    const deletedGuest = await Guest.findOneAndDelete({ id: req.params.id });
+    if (!deletedGuest) return res.status(404).json({ message: "Not found" });
+    
+    if (deletedGuest.photo) {
+      const photoPath = path.join(uploadDir, deletedGuest.photo);
+      if (fs.existsSync(photoPath)) fs.unlinkSync(photoPath);
+    }
+    
+    res.json({ message: "Guest deleted" });
+  } catch (error) {
+    res.status(500).json({ message: "Delete failed", error: error.message });
+  }
+});
+
+// GUEST TIME IN
+app.put("/guests/:id/time-in", async (req, res) => {
+  try {
+    const guest = await Guest.findOne({ id: req.params.id });
+    if (!guest) return res.status(404).json({ message: "Guest not found" });
+
+    const currentTime = new Date().toLocaleTimeString('en-US', { 
+      hour12: true,
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+    
+    const currentDate = new Date();
+
+    const updatedGuest = await Guest.findOneAndUpdate(
+      { id: req.params.id },
+      {
+        hasTimedIn: true,
+        timeIn: currentTime,
+        lastVisitDate: currentDate,
+        dateVisited: currentDate,
+        status: 'approved'
+      },
+      { new: true, runValidators: true }
+    );
+
+    const guestWithFullName = {
+      ...updatedGuest.toObject(),
+      fullName: updatedGuest.fullName
+    };
+
+    res.json(guestWithFullName);
+  } catch (error) {
+    console.error("Error processing guest time in:", error);
+    res.status(500).json({ message: "Failed to process time in", error: error.message });
+  }
+});
+
+// GUEST TIME OUT
+app.put("/guests/:id/time-out", async (req, res) => {
+  try {
+    const guest = await Guest.findOne({ id: req.params.id });
+    if (!guest) return res.status(404).json({ message: "Guest not found" });
+
+    const currentTime = new Date().toLocaleTimeString('en-US', { 
+      hour12: true,
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    const updatedGuest = await Guest.findOneAndUpdate(
+      { id: req.params.id },
+      {
+        hasTimedOut: true,
+        timeOut: currentTime,
+        status: 'completed'
+      },
+      { new: true, runValidators: true }
+    );
+
+    const guestWithFullName = {
+      ...updatedGuest.toObject(),
+      fullName: updatedGuest.fullName
+    };
+
+    res.json(guestWithFullName);
+  } catch (error) {
+    console.error("Error processing guest time out:", error);
+    res.status(500).json({ message: "Failed to process time out", error: error.message });
+  }
+});
+
+// ======================
 // HEALTH CHECK
 // ======================
 

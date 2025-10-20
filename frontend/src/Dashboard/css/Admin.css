@@ -501,3 +501,66 @@ body {
 .Toastify__toast-container {
     z-index: 9999;
 }
+/* Logo and Access Badge Styling - UPDATED */
+.logo-name {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-height: 40px;
+    justify-content: center;
+}
+
+.access-badge-container {
+    margin-top: 2px;
+    line-height: 1;
+}
+
+.access-badge {
+    font-size: 0.65rem !important;
+    padding: 0.2em 0.5em !important;
+    font-weight: 500;
+    white-space: nowrap;
+    line-height: 1.2;
+}
+
+/* When sidebar is closed - hide the badge */
+.sidebar.close .access-badge {
+    display: none;
+}
+
+/* Logo text styling */
+.logo-name span {
+    color: var(--dark);
+    font-size: 1.1rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+/* Ensure proper spacing in the logo area */
+.sidebar .logo {
+    height: 80px; /* Increased height to accommodate badge */
+    display: flex;
+    align-items: center;
+    color: var(--primary);
+    z-index: 500;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--grey);
+}
+
+.sidebar .logo .logo-name {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.sidebar.close .logo-name span {
+    display: none;
+}
+
+.sidebar .logo .bx {
+    min-width: 50px;
+    display: flex;
+    justify-content: center;
+    font-size: 2.2rem;
+}

@@ -4,12 +4,14 @@ import "./css/Admin.css";
 import "boxicons/css/boxicons.min.css";
 import "bootstrap/dist/css/bootstrap.min.css";
 import DashboardHome from "./Components/Dashboard";
+
+// Import Staff components
 import ViewVisitors from "./Components/Staff/ViewVisitors";
-import ViewInmates from "./Components/Staff/ViewInmates";
-import ViewCrimes from "./Components/Staff/ViewCrimes";
-import ViewReports from "./Components/Staff/ViewReports";
-import Guest from "./Components/Staff/Guest"; // Assuming you have a Staff version of Guest
-import ScanQR from "./Components/Staff/ScanQr"; // Assuming you have a Staff version
+import ViewRecordVisits from "./Components/Staff/ViewRecordVisits";
+import ReportsAnalytics from "./Components/Staff/ReportsAnalytics";
+import Guest from "./Components/Staff/Guest";
+import ScanQR from "./Components/Staff/ScanQr";
+
 import { Badge, Dropdown, Button } from "react-bootstrap";
 import axios from "axios";
 import { ToastContainer, toast } from "react-toastify";
@@ -62,10 +64,9 @@ const Staff = () => {
         <ul className="side-menu">
           {[
             { name: "Dashboard", icon: "bx bxs-dashboard", path: "/staff/dashboard" },
+            { name: "Recorded Visits", icon: "bx bxs-calendar-check", path: "/staff/record-visits" },
             { name: "Visitors", icon: "bx bxs-user-voice", path: "/staff/visitors" },
             { name: "Guests", icon: "bx bxs-user-badge", path: "/staff/guest" },
-            { name: "Inmates", icon: "bx bxs-user-account", path: "/staff/inmates" },
-            { name: "Crime List", icon: "bx bxs-error", path: "/staff/crimes" },
             { name: "Reports", icon: "bx bxs-report", path: "/staff/reports-analytics" },
           ].map((link, index) => (
             <li key={index}>
@@ -142,11 +143,10 @@ const Staff = () => {
           <Routes>
             <Route path="/" element={<Navigate to="/staff/dashboard" />} />
             <Route path="/dashboard" element={<DashboardHome />} />
+            <Route path="/record-visits" element={<ViewRecordVisits />} />
             <Route path="/visitors" element={<ViewVisitors />} />
             <Route path="/guest" element={<Guest />} />
-            <Route path="/inmates" element={<ViewInmates />} />
-            <Route path="/crimes" element={<ViewCrimes />} />
-            <Route path="/reports-analytics" element={<ViewReports />} />
+            <Route path="/reports-analytics" element={<ReportsAnalytics />} />
           </Routes>
         </main>
       </div>

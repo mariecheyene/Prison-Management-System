@@ -264,7 +264,7 @@ const Login = () => {
               marginBottom: "10px",
             }}
           >
-            Prison Management System
+            Visitor Management System
           </h1>
           <p
             style={{

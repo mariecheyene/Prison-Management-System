@@ -1,47 +1,40 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-import { Card, Row, Col, Container, Button, Collapse, Table, Badge, Alert, ProgressBar } from "react-bootstrap";
+import { Card, Row, Col, Container, Button, Alert, ProgressBar, Badge } from "react-bootstrap";
 import { 
   FaUsers, 
   FaUserFriends,
   FaUserCheck,
-  FaUserTimes,
   FaChartBar, 
   FaVenus, 
   FaMars, 
-  FaIdCard,
   FaUserShield,
   FaUserTie,
   FaUser,
-  FaClock,
-  FaCheckCircle,
-  FaTimesCircle,
-  FaExclamationTriangle,
-  FaHourglassHalf,
-  FaServer,
-  FaNetworkWired,
-  FaShieldAlt,
   FaUserClock,
   FaCalendarWeek,
   FaCalendarAlt,
   FaCalendarDay,
-  FaHistory
+  FaHistory,
+  FaExclamationTriangle
 } from "react-icons/fa";
 import "bootstrap/dist/css/bootstrap.min.css";
 
 const INMATES_API_URL = "http://localhost:5000/inmates";
 const VISITORS_API_URL = "http://localhost:5000/visitors";
+const GUESTS_API_URL = "http://localhost:5000/guests";
 const USERS_API_URL = "http://localhost:5000/users";
-const ACTIVE_TIMERS_URL = "http://localhost:5000/visitors/active-timers";
-const DEBUG_TIMERS_URL = "http://localhost:5000/visitors-debug/timers";
+const ACTIVE_TIMERS_URL = "http://localhost:5000/visit-logs/active-visitor-timers";
+const VISIT_LOGS_URL = "http://localhost:5000/visit-logs";
 
 const Dashboard = () => {
   const [inmates, setInmates] = useState([]);
   const [visitors, setVisitors] = useState([]);
+  const [guests, setGuests] = useState([]);
   const [users, setUsers] = useState([]);
   const [activeTimers, setActiveTimers] = useState([]);
+  const [visitLogs, setVisitLogs] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [showAnalytics, setShowAnalytics] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
 
   useEffect(() => {
@@ -64,14 +57,18 @@ const Dashboard = () => {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const [inmatesRes, visitorsRes, usersRes] = await Promise.all([
+      const [inmatesRes, visitorsRes, guestsRes, usersRes, visitLogsRes] = await Promise.all([
         axios.get(INMATES_API_URL),
         axios.get(VISITORS_API_URL),
-        axios.get(USERS_API_URL)
+        axios.get(GUESTS_API_URL),
+        axios.get(USERS_API_URL),
+        axios.get(VISIT_LOGS_URL)
       ]);
       setInmates(inmatesRes.data);
       setVisitors(visitorsRes.data);
+      setGuests(guestsRes.data);
       setUsers(usersRes.data);
+      setVisitLogs(visitLogsRes.data);
       await fetchActiveTimers();
       setLastUpdate(new Date());
     } catch (error) {
@@ -82,13 +79,9 @@ const Dashboard = () => {
 
   const fetchActiveTimers = async () => {
     try {
-      console.log('🔄 Fetching active timers from:', ACTIVE_TIMERS_URL);
+      console.log('🔄 Fetching active VISITOR timers from:', ACTIVE_TIMERS_URL);
       const response = await axios.get(ACTIVE_TIMERS_URL);
-      console.log('✅ Active timers received:', response.data.length);
-      
-      response.data.forEach((timer, index) => {
-        console.log(`   ${index + 1}. ${timer.fullName}: ${timer.timeRemainingMinutes}min - Active: ${timer.isTimerActive}`);
-      });
+      console.log('✅ Active VISITOR timers received:', response.data.length);
       
       setActiveTimers(response.data);
     } catch (error) {
@@ -99,84 +92,86 @@ const Dashboard = () => {
   // Helper functions for statistics
   const getTotalInmates = () => inmates.length;
   const getTotalVisitors = () => visitors.length;
+  const getTotalGuests = () => guests.length;
   const getMaleInmates = () => inmates.filter(i => i.sex === "Male").length;
   const getFemaleInmates = () => inmates.filter(i => i.sex === "Female").length;
   const getPendingVisitors = () => visitors.filter(v => v.status === "pending").length;
   const getApprovedVisitors = () => visitors.filter(v => v.status === "approved").length;
   const getRejectedVisitors = () => visitors.filter(v => v.status === "rejected").length;
+  const getPendingGuests = () => guests.filter(g => g.status === "pending").length;
+  const getApprovedGuests = () => guests.filter(g => g.status === "approved").length;
+  const getRejectedGuests = () => guests.filter(g => g.status === "rejected").length;
+  const getCompletedGuests = () => guests.filter(g => g.status === "completed").length;
   const getTotalUsers = () => users.length;
   const getTotalAdmins = () => users.filter(u => u.role && u.role.includes('Admin')).length;
   const getTotalStaff = () => users.filter(u => u.role && u.role.includes('Staff')).length;
   
-  // FIXED: Count ALL visits where visitor has timed in (multiple visits per person)
-  const getTotalRecordedVisits = () => {
-    return visitors.filter(v => v.hasTimedIn).length;
-  };
+  // Count from visit logs
+  const getTotalRecordedVisits = () => visitLogs.length;
 
-  // FIXED: Count visits for current week (each timed-in visit counts)
+  // Count visits for current week from visit logs
   const getVisitorsThisWeek = () => {
     const startOfWeek = new Date();
     startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
     startOfWeek.setHours(0, 0, 0, 0);
     
-    return visitors.filter(v => {
-      if (!v.hasTimedIn) return false;
-      const visitDate = v.dateVisited ? new Date(v.dateVisited) : new Date(v.createdAt);
+    return visitLogs.filter(log => {
+      const visitDate = new Date(log.visitDate);
       return visitDate >= startOfWeek;
     }).length;
   };
 
-  // FIXED: Count visits for current month (each timed-in visit counts)
+  // Count visits for current month from visit logs
   const getVisitorsThisMonth = () => {
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
     
-    return visitors.filter(v => {
-      if (!v.hasTimedIn) return false;
-      const visitDate = v.dateVisited ? new Date(v.dateVisited) : new Date(v.createdAt);
+    return visitLogs.filter(log => {
+      const visitDate = new Date(log.visitDate);
       return visitDate >= startOfMonth;
     }).length;
   };
 
-  // FIXED: Count visits for current year (each timed-in visit counts)
+  // Count visits for current year from visit logs
   const getVisitorsThisYear = () => {
     const startOfYear = new Date(new Date().getFullYear(), 0, 1);
     
-    return visitors.filter(v => {
-      if (!v.hasTimedIn) return false;
-      const visitDate = v.dateVisited ? new Date(v.dateVisited) : new Date(v.createdAt);
+    return visitLogs.filter(log => {
+      const visitDate = new Date(log.visitDate);
       return visitDate >= startOfYear;
     }).length;
   };
 
-  // FIXED: Get unique visitors (people) who have visited
+  // Get unique visitors from visit logs
   const getUniqueVisitors = () => {
-    const uniqueVisitorIds = new Set();
-    visitors.forEach(v => {
-      if (v.hasTimedIn) {
-        // Use combination of name and contact to identify unique visitors
-        const visitorKey = `${v.fullName}-${v.contact || ''}`;
-        uniqueVisitorIds.add(visitorKey);
-      }
-    });
+    const uniqueVisitorIds = new Set(visitLogs.map(log => log.personId));
     return uniqueVisitorIds.size;
   };
 
-  // FIXED: Get repeat visitors (people who visited more than once)
+  // Get repeat visitors from visit logs
   const getRepeatVisitors = () => {
     const visitorCounts = {};
-    visitors.forEach(v => {
-      if (v.hasTimedIn) {
-        const visitorKey = `${v.fullName}-${v.contact || ''}`;
-        visitorCounts[visitorKey] = (visitorCounts[visitorKey] || 0) + 1;
-      }
+    visitLogs.forEach(log => {
+      visitorCounts[log.personId] = (visitorCounts[log.personId] || 0) + 1;
     });
     
     return Object.values(visitorCounts).filter(count => count > 1).length;
   };
 
-  // Timer helper functions (keep existing)
+  // Get active guests (for statistics) - guests don't have timers but can be checked in
+  const getActiveGuestsNow = () => {
+    const today = new Date().toISOString().split('T')[0];
+    return guests.filter(guest => {
+      const hasTodayVisit = guest.dailyVisits?.some(visit => {
+        const visitDate = new Date(visit.visitDate).toISOString().split('T')[0];
+        return visitDate === today && visit.hasTimedIn && !visit.hasTimedOut;
+      });
+      return hasTodayVisit;
+    }).length;
+  };
+
+  // Timer helper functions - VISITORS ONLY
   const formatTimeRemaining = (minutes) => {
     if (minutes === null || minutes === undefined) return 'N/A';
     const hours = Math.floor(minutes / 60);
@@ -189,14 +184,7 @@ const Dashboard = () => {
 
   const formatTimeIn = (timeIn) => {
     if (!timeIn) return 'N/A';
-    if (typeof timeIn === 'string' && timeIn.includes(':')) {
-      const [hours, minutes] = timeIn.split(':');
-      const hour = parseInt(hours);
-      const ampm = hour >= 12 ? 'PM' : 'AM';
-      const twelveHour = hour % 12 || 12;
-      return `${twelveHour}:${minutes} ${ampm}`;
-    }
-    return 'N/A';
+    return timeIn;
   };
 
   const getTimerVariant = (minutes) => {
@@ -206,7 +194,7 @@ const Dashboard = () => {
   };
 
   const getTimerProgress = (minutes) => {
-    const totalMinutes = 180;
+    const totalMinutes = 180; // 3 hours
     return Math.max(0, Math.min(100, (minutes / totalMinutes) * 100));
   };
 
@@ -224,6 +212,11 @@ const Dashboard = () => {
       .slice(0, 5);
   };
 
+  // Get active visitors count (for statistics)
+  const getActiveVisitorsNow = () => {
+    return activeTimers.length;
+  };
+
   return (
     <Container className="mt-4">
       <div className="d-flex justify-content-between align-items-center mb-4">
@@ -234,7 +227,7 @@ const Dashboard = () => {
           paddingBottom: "10px",
           margin: 0
         }}>
-          Prison Management Dashboard
+          Visitor Management Dashboard
         </h2>
         <Button 
           variant="outline-info" 
@@ -254,7 +247,7 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Critical Alert Section */}
+      {/* Critical Alert Section - VISITORS ONLY */}
       {getCriticalTimers().length > 0 && (
         <Row className="mb-3">
           <Col>
@@ -270,7 +263,7 @@ const Dashboard = () => {
         </Row>
       )}
 
-      {/* Active Timers Section */}
+      {/* Active Timers Section - VISITORS ONLY */}
       <Row className="mb-4">
         <Col>
           <Card className="shadow-sm border-0">
@@ -281,8 +274,8 @@ const Dashboard = () => {
             }>
               <h5 className="mb-0 d-flex align-items-center justify-content-between">
                 <div>
-                  <FaHourglassHalf className="me-2" />
-                  Active Visitor Timers 
+                  <FaUserClock className="me-2" />
+                  Active Visitor Timers (3 Hours)
                   <Badge bg="light" text="dark" className="ms-2">
                     {activeTimers.length} Active
                   </Badge>
@@ -301,13 +294,13 @@ const Dashboard = () => {
             <Card.Body className="p-3">
               {activeTimers.length > 0 ? (
                 <>
-                  {getTopUrgentTimers().map((visitor, index) => (
+                  {getTopUrgentTimers().map((timer, index) => (
                     <div 
-                      key={visitor._id || index}
+                      key={timer._id || index}
                       className={`mb-3 p-3 border rounded ${
-                        visitor.timeRemainingMinutes < 10 
+                        timer.timeRemainingMinutes < 10 
                           ? 'border-danger bg-danger bg-opacity-10' 
-                          : visitor.timeRemainingMinutes < 30 
+                          : timer.timeRemainingMinutes < 30 
                           ? 'border-warning bg-warning bg-opacity-10' 
                           : 'border-success bg-success bg-opacity-10'
                       }`}
@@ -317,20 +310,20 @@ const Dashboard = () => {
                           <div className="d-flex align-items-center">
                             <div className="me-3">
                               <FaUserClock size={24} className={
-                                visitor.timeRemainingMinutes < 10 
+                                timer.timeRemainingMinutes < 10 
                                   ? 'text-danger' 
-                                  : visitor.timeRemainingMinutes < 30 
+                                  : timer.timeRemainingMinutes < 30 
                                   ? 'text-warning' 
                                   : 'text-success'
                               } />
                             </div>
                             <div>
-                              <div className="fw-bold fs-6">{visitor.fullName}</div>
+                              <div className="fw-bold fs-6">{timer.personName}</div>
                               <div className="text-muted small">
-                                Timed In: {formatTimeIn(visitor.timeIn)}
+                                Timed In: {formatTimeIn(timer.timeIn)}
                               </div>
                               <div className="small text-muted">
-                                Visitor ID: {visitor.id}
+                                Visitor ID: {timer.personId}
                               </div>
                             </div>
                           </div>
@@ -338,22 +331,24 @@ const Dashboard = () => {
                         <Col md={3}>
                           <div className="small">
                             <div className="fw-bold">Prisoner:</div>
-                            <div className="text-muted">{visitor.prisonerId}</div>
+                            <div className="text-muted">{timer.prisonerId || 'N/A'}</div>
+                            <div className="fw-bold mt-1">Inmate:</div>
+                            <div className="text-muted">{timer.inmateName || 'N/A'}</div>
                           </div>
                         </Col>
                         <Col md={3}>
                           <div className="d-flex align-items-center">
                             <Badge 
-                              bg={getTimerVariant(visitor.timeRemainingMinutes)} 
+                              bg={getTimerVariant(timer.timeRemainingMinutes)} 
                               className="me-3 p-2 fs-6"
                             >
-                              {formatTimeRemaining(visitor.timeRemainingMinutes)}
+                              {formatTimeRemaining(timer.timeRemainingMinutes)}
                             </Badge>
                             <div className="flex-grow-1" style={{ maxWidth: '120px' }}>
                               <ProgressBar 
-                                now={getTimerProgress(visitor.timeRemainingMinutes)} 
-                                variant={getTimerVariant(visitor.timeRemainingMinutes)}
-                                animated={visitor.timeRemainingMinutes < 30}
+                                now={getTimerProgress(timer.timeRemainingMinutes)} 
+                                variant={getTimerVariant(timer.timeRemainingMinutes)}
+                                animated={timer.timeRemainingMinutes < 30}
                                 style={{ 
                                   height: '10px',
                                   backgroundColor: '#e9ecef'
@@ -363,17 +358,17 @@ const Dashboard = () => {
                           </div>
                         </Col>
                         <Col md={2} className="text-center">
-                          {visitor.timeRemainingMinutes < 10 && (
+                          {timer.timeRemainingMinutes < 10 && (
                             <Badge bg="danger" className="p-2 fs-6">
                               ⚠️ Critical
                             </Badge>
                           )}
-                          {visitor.timeRemainingMinutes >= 10 && visitor.timeRemainingMinutes < 30 && (
+                          {timer.timeRemainingMinutes >= 10 && timer.timeRemainingMinutes < 30 && (
                             <Badge bg="warning" text="dark" className="p-2 fs-6">
                               🔥 Urgent
                             </Badge>
                           )}
-                          {visitor.timeRemainingMinutes >= 30 && (
+                          {timer.timeRemainingMinutes >= 30 && (
                             <Badge bg="success" className="p-2 fs-6">
                               ✅ Active
                             </Badge>
@@ -386,9 +381,9 @@ const Dashboard = () => {
                   {activeTimers.length > 5 && (
                     <div className="text-center mt-3">
                       <Alert variant="info" className="mb-0">
-                        <strong>... and {activeTimers.length - 5} more active timers</strong>
+                        <strong>... and {activeTimers.length - 5} more active visitor timers</strong>
                         <br />
-                        <small>Total {activeTimers.length} visitors with active timers</small>
+                        <small>Total {activeTimers.length} visitors with active 3-hour timers</small>
                       </Alert>
                     </div>
                   )}
@@ -396,9 +391,11 @@ const Dashboard = () => {
               ) : (
                 <div className="text-center py-4">
                   <FaUserClock size={48} className="text-muted mb-3" />
-                  <h5 className="text-muted">No Active Timers</h5>
+                  <h5 className="text-muted">No Active Visitor Timers</h5>
                   <p className="text-muted">
-                    When visitors check in and are approved, their timers will appear here.
+                    When visitors check in and are approved, their 3-hour timers will appear here.
+                    <br />
+                    <small>Guests do not have timers - only time in/out recording.</small>
                   </p>
                 </div>
               )}
@@ -442,7 +439,7 @@ const Dashboard = () => {
                 {getTotalVisitors()}
               </Card.Text>
               <div className="small text-muted">
-                <FaCheckCircle className="text-success me-1" /> {getApprovedVisitors()} Approved
+                <FaUserCheck className="text-success me-1" /> {getApprovedVisitors()} Approved
               </div>
             </Card.Body>
           </Card>
@@ -451,7 +448,22 @@ const Dashboard = () => {
         <Col md={3}>
           <Card className="text-center h-100 shadow-sm border-0">
             <Card.Body className="p-3">
-              <FaUser size={30} className="mb-2 text-info" />
+              <FaUserFriends size={30} className="mb-2 text-info" />
+              <Card.Title style={{ fontSize: "1rem", color: "#2c3e50" }}>Total Guests</Card.Title>
+              <Card.Text style={{ fontSize: "1.8rem", fontWeight: "bold", color: "#2c3e50" }}>
+                {getTotalGuests()}
+              </Card.Text>
+              <div className="small text-muted">
+                <FaUserCheck className="text-success me-1" /> {getApprovedGuests()} Approved
+              </div>
+            </Card.Body>
+          </Card>
+        </Col>
+
+        <Col md={3}>
+          <Card className="text-center h-100 shadow-sm border-0">
+            <Card.Body className="p-3">
+              <FaUser size={30} className="mb-2 text-warning" />
               <Card.Title style={{ fontSize: "1rem", color: "#2c3e50" }}>Total System Users</Card.Title>
               <Card.Text style={{ fontSize: "1.8rem", fontWeight: "bold", color: "#2c3e50" }}>
                 {getTotalUsers()}
@@ -459,21 +471,6 @@ const Dashboard = () => {
               <div className="small text-muted">
                 <FaUserShield className="me-1" /> {getTotalAdmins()} Admin • 
                 <FaUserTie className="ms-2 me-1" /> {getTotalStaff()} Staff
-              </div>
-            </Card.Body>
-          </Card>
-        </Col>
-
-        <Col md={3}>
-          <Card className="text-center h-100 shadow-sm border-0">
-            <Card.Body className="p-3">
-              <FaHistory size={30} className="mb-2 text-warning" />
-              <Card.Title style={{ fontSize: "1rem", color: "#2c3e50" }}>Total Recorded Visits</Card.Title>
-              <Card.Text style={{ fontSize: "1.8rem", fontWeight: "bold", color: "#2c3e50" }}>
-                {getTotalRecordedVisits()}
-              </Card.Text>
-              <div className="small text-muted">
-                {getUniqueVisitors()} unique visitors
               </div>
             </Card.Body>
           </Card>
@@ -542,7 +539,7 @@ const Dashboard = () => {
         </Col>
       </Row>
 
-      {/* Additional Metrics */}
+      {/* Visitor Analytics */}
       <Row className="mb-4">
         <Col>
           <h5 className="mb-3" style={{ color: "#2c3e50", borderBottom: "1px solid #dee2e6", paddingBottom: "8px" }}>
@@ -552,7 +549,7 @@ const Dashboard = () => {
         </Col>
       </Row>
       <Row className="mb-4 g-3">
-        <Col md={4}>
+        <Col md={3}>
           <Card className="text-center h-100 shadow-sm border-0">
             <Card.Body className="p-3">
               <FaUserFriends size={25} className="mb-2 text-primary" />
@@ -567,7 +564,7 @@ const Dashboard = () => {
           </Card>
         </Col>
 
-        <Col md={4}>
+        <Col md={3}>
           <Card className="text-center h-100 shadow-sm border-0">
             <Card.Body className="p-3">
               <FaUserCheck size={25} className="mb-2 text-success" />
@@ -582,17 +579,170 @@ const Dashboard = () => {
           </Card>
         </Col>
 
-        <Col md={4}>
+        <Col md={3}>
           <Card className="text-center h-100 shadow-sm border-0">
             <Card.Body className="p-3">
               <FaUserClock size={25} className="mb-2 text-warning" />
-              <Card.Title style={{ fontSize: "0.9rem", color: "#2c3e50" }}>Active Now</Card.Title>
+              <Card.Title style={{ fontSize: "0.9rem", color: "#2c3e50" }}>Active Visitors</Card.Title>
               <Card.Text style={{ fontSize: "1.5rem", fontWeight: "bold", color: "#2c3e50" }}>
-                {activeTimers.length}
+                {getActiveVisitorsNow()}
               </Card.Text>
               <div className="small text-muted">
-                Currently with active timers
+                Visitors with active timers
               </div>
+            </Card.Body>
+          </Card>
+        </Col>
+
+        <Col md={3}>
+          <Card className="text-center h-100 shadow-sm border-0">
+            <Card.Body className="p-3">
+              <FaHistory size={25} className="mb-2 text-info" />
+              <Card.Title style={{ fontSize: "0.9rem", color: "#2c3e50" }}>Total Recorded Visits</Card.Title>
+              <Card.Text style={{ fontSize: "1.5rem", fontWeight: "bold", color: "#2c3e50" }}>
+                {getTotalRecordedVisits()}
+              </Card.Text>
+              <div className="small text-muted">
+                All time visit records
+              </div>
+            </Card.Body>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Guest Analytics */}
+      <Row className="mb-4">
+        <Col>
+          <h5 className="mb-3" style={{ color: "#2c3e50", borderBottom: "1px solid #dee2e6", paddingBottom: "8px" }}>
+            <FaUserFriends className="me-2" />
+            Guest Analytics
+          </h5>
+        </Col>
+      </Row>
+      <Row className="mb-4 g-3">
+        <Col md={3}>
+          <Card className="text-center h-100 shadow-sm border-0">
+            <Card.Body className="p-3">
+              <FaUserFriends size={25} className="mb-2 text-primary" />
+              <Card.Title style={{ fontSize: "0.9rem", color: "#2c3e50" }}>Total Guests</Card.Title>
+              <Card.Text style={{ fontSize: "1.5rem", fontWeight: "bold", color: "#2c3e50" }}>
+                {getTotalGuests()}
+              </Card.Text>
+              <div className="small text-muted">
+                All registered guests
+              </div>
+            </Card.Body>
+          </Card>
+        </Col>
+
+        <Col md={3}>
+          <Card className="text-center h-100 shadow-sm border-0">
+            <Card.Body className="p-3">
+              <FaUserCheck size={25} className="mb-2 text-success" />
+              <Card.Title style={{ fontSize: "0.9rem", color: "#2c3e50" }}>Approved Guests</Card.Title>
+              <Card.Text style={{ fontSize: "1.5rem", fontWeight: "bold", color: "#2c3e50" }}>
+                {getApprovedGuests()}
+              </Card.Text>
+              <div className="small text-muted">
+                Currently approved
+              </div>
+            </Card.Body>
+          </Card>
+        </Col>
+
+        <Col md={3}>
+          <Card className="text-center h-100 shadow-sm border-0">
+            <Card.Body className="p-3">
+              <FaUserClock size={25} className="mb-2 text-warning" />
+              <Card.Title style={{ fontSize: "0.9rem", color: "#2c3e50" }}>Pending Guests</Card.Title>
+              <Card.Text style={{ fontSize: "1.5rem", fontWeight: "bold", color: "#2c3e50" }}>
+                {getPendingGuests()}
+              </Card.Text>
+              <div className="small text-muted">
+                Awaiting approval
+              </div>
+            </Card.Body>
+          </Card>
+        </Col>
+
+        <Col md={3}>
+          <Card className="text-center h-100 shadow-sm border-0">
+            <Card.Body className="p-3">
+              <FaUserClock size={25} className="mb-2 text-info" />
+              <Card.Title style={{ fontSize: "0.9rem", color: "#2c3e50" }}>Active Guests</Card.Title>
+              <Card.Text style={{ fontSize: "1.5rem", fontWeight: "bold", color: "#2c3e50" }}>
+                {getActiveGuestsNow()}
+              </Card.Text>
+              <div className="small text-muted">
+                Checked in today
+              </div>
+            </Card.Body>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Status Breakdown */}
+      <Row className="mb-4">
+        <Col>
+          <h5 className="mb-3" style={{ color: "#2c3e50", borderBottom: "1px solid #dee2e6", paddingBottom: "8px" }}>
+            <FaChartBar className="me-2" />
+            Status Breakdown
+          </h5>
+        </Col>
+      </Row>
+      <Row className="mb-4 g-3">
+        <Col md={6}>
+          <Card className="text-center h-100 shadow-sm border-0">
+            <Card.Header className="bg-primary text-white">
+              <h6 className="mb-0">Visitor Status</h6>
+            </Card.Header>
+            <Card.Body className="p-3">
+              <Row>
+                <Col>
+                  <div className="d-flex justify-content-between align-items-center mb-2">
+                    <span>Approved:</span>
+                    <Badge bg="success">{getApprovedVisitors()}</Badge>
+                  </div>
+                  <div className="d-flex justify-content-between align-items-center mb-2">
+                    <span>Pending:</span>
+                    <Badge bg="warning" text="dark">{getPendingVisitors()}</Badge>
+                  </div>
+                  <div className="d-flex justify-content-between align-items-center">
+                    <span>Rejected:</span>
+                    <Badge bg="danger">{getRejectedVisitors()}</Badge>
+                  </div>
+                </Col>
+              </Row>
+            </Card.Body>
+          </Card>
+        </Col>
+
+        <Col md={6}>
+          <Card className="text-center h-100 shadow-sm border-0">
+            <Card.Header className="bg-info text-white">
+              <h6 className="mb-0">Guest Status</h6>
+            </Card.Header>
+            <Card.Body className="p-3">
+              <Row>
+                <Col>
+                  <div className="d-flex justify-content-between align-items-center mb-2">
+                    <span>Approved:</span>
+                    <Badge bg="success">{getApprovedGuests()}</Badge>
+                  </div>
+                  <div className="d-flex justify-content-between align-items-center mb-2">
+                    <span>Pending:</span>
+                    <Badge bg="warning" text="dark">{getPendingGuests()}</Badge>
+                  </div>
+                  <div className="d-flex justify-content-between align-items-center mb-2">
+                    <span>Rejected:</span>
+                    <Badge bg="danger">{getRejectedGuests()}</Badge>
+                  </div>
+                  <div className="d-flex justify-content-between align-items-center">
+                    <span>Completed:</span>
+                    <Badge bg="secondary">{getCompletedGuests()}</Badge>
+                  </div>
+                </Col>
+              </Row>
             </Card.Body>
           </Card>
         </Col>

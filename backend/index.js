@@ -148,7 +148,7 @@ inmateSchema.virtual('fullName').get(function() {
 
 const Inmate = mongoose.model('Inmate', inmateSchema);
 
-// Visitor Schema with Time Tracking
+// Visitor Schema with Daily Visit Tracking
 const visitorSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
   lastName: { type: String, required: true },
@@ -168,7 +168,7 @@ const visitorSchema = new mongoose.Schema({
   prisonerId: { type: String, required: true, ref: 'Inmate' },
   relationship: String,
   
-  // Time tracking fields
+  // Time tracking fields (for current session)
   dateVisited: { type: Date, default: null },
   timeIn: { type: String, default: null },
   timeOut: { type: String, default: null },
@@ -181,6 +181,28 @@ const visitorSchema = new mongoose.Schema({
   timerEnd: { type: Date, default: null },
   isTimerActive: { type: Boolean, default: false },
   visitApproved: { type: Boolean, default: false },
+  
+  // Daily visit tracking
+  dailyVisits: [{
+    visitDate: { type: Date, required: true },
+    timeIn: String,
+    timeOut: String,
+    hasTimedIn: { type: Boolean, default: false },
+    hasTimedOut: { type: Boolean, default: false },
+    timerStart: Date,
+    timerEnd: Date,
+    isTimerActive: { type: Boolean, default: false },
+    visitLogId: { type: mongoose.Schema.Types.ObjectId, ref: 'VisitLog' }
+  }],
+  
+  // Current day status (for quick lookup)
+  currentDayStatus: {
+    visitDate: Date,
+    hasTimedIn: { type: Boolean, default: false },
+    hasTimedOut: { type: Boolean, default: false },
+    timeIn: String,
+    timeOut: String
+  },
   
   // Status and violations
   status: { 
@@ -215,10 +237,6 @@ visitorSchema.virtual('timeRemainingMinutes').get(function() {
 
 const Visitor = mongoose.model('Visitor', visitorSchema);
 
-// ======================
-// UPDATED GUEST SCHEMA
-// ======================
-
 const guestSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
   lastName: { type: String, required: true },
@@ -226,7 +244,8 @@ const guestSchema = new mongoose.Schema({
   middleName: String,
   extension: String,
   
-  // Guest details
+  // ADD THESE FIELDS TO GUEST SCHEMA:
+  photo: String, // ADD THIS LINE
   dateOfBirth: Date,
   age: Number,
   sex: { type: String, enum: ['Male', 'Female'] },
@@ -241,6 +260,29 @@ const guestSchema = new mongoose.Schema({
   hasTimedIn: { type: Boolean, default: false },
   hasTimedOut: { type: Boolean, default: false },
   lastVisitDate: Date,
+  
+  // Daily visit tracking
+  dailyVisits: [{
+    visitDate: { type: Date, required: true },
+    timeIn: String,
+    timeOut: String,
+    hasTimedIn: { type: Boolean, default: false },
+    hasTimedOut: { type: Boolean, default: false },
+    visitLogId: { type: mongoose.Schema.Types.ObjectId, ref: 'VisitLog' }
+  }],
+  
+  // Current day status
+  currentDayStatus: {
+    visitDate: Date,
+    hasTimedIn: { type: Boolean, default: false },
+    hasTimedOut: { type: Boolean, default: false },
+    timeIn: String,
+    timeOut: String
+  },
+  
+  // ADD VIOLATION FIELDS TO GUEST SCHEMA:
+  violationType: String, // ADD THIS LINE
+  violationDetails: String, // ADD THIS LINE
   
   // Approval system
   status: { 
@@ -257,17 +299,650 @@ const guestSchema = new mongoose.Schema({
   qrCode: String,
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 }, { timestamps: true });
-
+  
 guestSchema.virtual('fullName').get(function() {
   return `${this.lastName}, ${this.firstName} ${this.middleName || ''} ${this.extension || ''}`.trim();
 });
 
 const Guest = mongoose.model('Guest', guestSchema);
 
+// Visit Log Schema
+const visitLogSchema = new mongoose.Schema({
+  personId: { type: String, required: true },
+  personName: { type: String, required: true },
+  personType: { type: String, required: true, enum: ['visitor', 'guest'] },
+  prisonerId: { type: String, default: null },
+  inmateName: { type: String, default: null },
+  visitDate: { type: Date, required: true },
+  timeIn: { type: String, required: true },
+  timeOut: { type: String, default: null },
+  visitDuration: { type: String, default: null },
+  status: { 
+    type: String, 
+    enum: ['in-progress', 'completed'], 
+    default: 'in-progress' 
+  },
+  isTimerActive: { type: Boolean, default: false },
+  timerStart: { type: Date, default: null },
+  timerEnd: { type: Date, default: null }
+}, { timestamps: true });
+
+const VisitLog = mongoose.model('VisitLog', visitLogSchema);
+
 // ======================
-// USER ENDPOINTS
+// SMART SCAN PROCESSING ENDPOINTS
 // ======================
 
+// ======================
+// SMART SCAN PROCESSING ENDPOINTS - UPDATED
+// ======================
+
+// SMART SCAN PROCESSING - Handles both visitors and guests with daily limits
+app.post("/scan-process", async (req, res) => {
+  try {
+    const { qrData, personId, isGuest } = req.body;
+    
+    console.log('🔍 Processing scan request:', { 
+      personId, 
+      isGuest, 
+      qrData: qrData ? qrData.substring(0, 100) + '...' : 'empty' 
+    });
+
+    // Validate required fields
+    if (!personId) {
+      return res.status(400).json({ 
+        message: "Person ID is required" 
+      });
+    }
+
+    let person;
+    try {
+      if (isGuest) {
+        person = await Guest.findOne({ id: personId });
+      } else {
+        person = await Visitor.findOne({ id: personId });
+      }
+    } catch (dbError) {
+      console.error('❌ Database error:', dbError);
+      return res.status(500).json({ 
+        message: "Database error while fetching person", 
+        error: dbError.message 
+      });
+    }
+
+    if (!person) {
+      console.log('❌ Person not found:', { personId, isGuest });
+      return res.status(404).json({ 
+        message: `${isGuest ? 'Guest' : 'Visitor'} with ID ${personId} not found` 
+      });
+    }
+
+    const today = new Date();
+    const todayDateString = today.toISOString().split('T')[0];
+    
+    // Find today's visit record
+    let todayVisit = person.dailyVisits.find(visit => {
+      if (!visit.visitDate) return false;
+      const visitDate = new Date(visit.visitDate).toISOString().split('T')[0];
+      return visitDate === todayDateString;
+    });
+
+    let scanResult = {
+      person: person,
+      scanType: '',
+      message: '',
+      canProceed: false,
+      requiresApproval: false,
+      todayVisit: todayVisit
+    };
+
+    console.log('📊 Today visit status:', { 
+      hasTodayVisit: !!todayVisit,
+      hasTimedIn: todayVisit?.hasTimedIn,
+      hasTimedOut: todayVisit?.hasTimedOut 
+    });
+
+    // SCANNING LOGIC
+    if (!todayVisit) {
+      // FIRST SCAN OF THE DAY - TIME IN REQUEST
+      scanResult.scanType = 'time_in_pending';
+      scanResult.message = `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME IN REQUEST - Ready for first visit today`;
+      scanResult.canProceed = true;
+      scanResult.requiresApproval = true;
+      
+    } else if (todayVisit && !todayVisit.hasTimedIn) {
+      // HAS VISIT RECORD BUT NOT TIMED IN YET
+      scanResult.scanType = 'time_in_pending';
+      scanResult.message = `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME IN REQUEST - Ready to start visit`;
+      scanResult.canProceed = true;
+      scanResult.requiresApproval = true;
+      
+    } else if (todayVisit && todayVisit.hasTimedIn && !todayVisit.hasTimedOut) {
+      // HAS TIMED IN BUT NOT TIMED OUT - TIME OUT REQUEST
+      scanResult.scanType = 'time_out_pending';
+      scanResult.message = `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME OUT REQUEST - Ready to end visit`;
+      scanResult.canProceed = true;
+      scanResult.requiresApproval = true;
+      
+    } else if (todayVisit && todayVisit.hasTimedIn && todayVisit.hasTimedOut) {
+      // ALREADY COMPLETED VISIT FOR TODAY
+      scanResult.scanType = 'completed';
+      scanResult.message = `✅ You have already completed your visit today. Please come back tomorrow.`;
+      scanResult.canProceed = false;
+      scanResult.requiresApproval = false;
+    } else {
+      // FALLBACK - Should not happen, but just in case
+      scanResult.scanType = 'time_in_pending';
+      scanResult.message = `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME IN REQUEST - Ready for visit`;
+      scanResult.canProceed = true;
+      scanResult.requiresApproval = true;
+    }
+
+    console.log('📊 Final scan result:', scanResult.scanType);
+    res.json(scanResult);
+
+  } catch (error) {
+    console.error('❌ Scan processing error:', error);
+    res.status(500).json({ 
+      message: 'Failed to process scan', 
+      error: error.message,
+      stack: error.stack 
+    });
+  }
+});
+
+// APPROVE VISITOR TIME IN - FIXED to always create visit log
+app.put("/visitors/:id/approve-time-in", async (req, res) => {
+  try {
+    const visitor = await Visitor.findOne({ id: req.params.id });
+    if (!visitor) return res.status(404).json({ message: "Visitor not found" });
+
+    const today = new Date();
+    const todayDateString = today.toISOString().split('T')[0];
+    const currentTime = new Date().toLocaleTimeString('en-US', { 
+      hour12: true,
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    // ALWAYS CREATE NEW VISIT LOG FOR TIME IN
+    const timerStart = new Date();
+    const timerEnd = new Date(timerStart.getTime() + (3 * 60 * 60 * 1000)); // 3 hours
+
+    // Get inmate name for visit log
+    let inmateName = 'Unknown Inmate';
+    try {
+      const inmate = await Inmate.findOne({ inmateCode: visitor.prisonerId });
+      if (inmate) inmateName = inmate.fullName;
+    } catch (inmateError) {
+      console.warn('⚠️ Could not fetch inmate details:', inmateError);
+    }
+
+    // CREATE VISIT LOG (ALWAYS CREATE NEW ONE)
+    const visitLog = new VisitLog({
+      personId: visitor.id,
+      personName: visitor.fullName,
+      personType: 'visitor',
+      prisonerId: visitor.prisonerId,
+      inmateName: inmateName,
+      visitDate: today,
+      timeIn: currentTime,
+      timerStart: timerStart,
+      timerEnd: timerEnd,
+      isTimerActive: true,
+      status: 'in-progress'
+    });
+
+    await visitLog.save();
+
+    // Update visitor record
+    visitor.hasTimedIn = true;
+    visitor.hasTimedOut = false;
+    visitor.timeIn = currentTime;
+    visitor.timeOut = null;
+    visitor.isTimerActive = true;
+    visitor.timerStart = timerStart;
+    visitor.timerEnd = timerEnd;
+    visitor.lastVisitDate = today;
+    visitor.dateVisited = today;
+
+    // Add to daily visits
+    const todayVisit = {
+      visitDate: today,
+      timeIn: currentTime,
+      hasTimedIn: true,
+      hasTimedOut: false,
+      timerStart: timerStart,
+      timerEnd: timerEnd,
+      isTimerActive: true,
+      visitLogId: visitLog._id
+    };
+    
+    // Remove any existing today's visit and add new one
+    visitor.dailyVisits = visitor.dailyVisits.filter(visit => {
+      const visitDate = new Date(visit.visitDate).toISOString().split('T')[0];
+      return visitDate !== todayDateString;
+    });
+    visitor.dailyVisits.push(todayVisit);
+
+    await visitor.save();
+
+    const visitorWithFullName = {
+      ...visitor.toObject(),
+      fullName: visitor.fullName
+    };
+
+    res.json({ 
+      message: "Time in approved and timer started",
+      visitor: visitorWithFullName,
+      visitLog: visitLog
+    });
+
+  } catch (error) {
+    console.error("Error approving time in:", error);
+    res.status(500).json({ message: "Failed to approve time in", error: error.message });
+  }
+});
+
+// APPROVE VISITOR TIME OUT - FIXED to properly update visit log
+app.put("/visitors/:id/approve-time-out", async (req, res) => {
+  try {
+    const visitor = await Visitor.findOne({ id: req.params.id });
+    if (!visitor) return res.status(404).json({ message: "Visitor not found" });
+
+    const today = new Date();
+    const todayDateString = today.toISOString().split('T')[0];
+    const currentTime = new Date().toLocaleTimeString('en-US', { 
+      hour12: true,
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    // Find today's visit
+    const todayVisit = visitor.dailyVisits.find(visit => {
+      const visitDate = new Date(visit.visitDate).toISOString().split('T')[0];
+      return visitDate === todayDateString;
+    });
+
+    if (!todayVisit || !todayVisit.hasTimedIn) {
+      return res.status(400).json({ message: "Visitor has not timed in today" });
+    }
+
+    // Update today's visit
+    todayVisit.timeOut = currentTime;
+    todayVisit.hasTimedOut = true;
+    todayVisit.isTimerActive = false;
+
+    // Update main visitor record
+    visitor.hasTimedOut = true;
+    visitor.timeOut = currentTime;
+    visitor.isTimerActive = false;
+
+    // UPDATE VISIT LOG - FIXED
+    if (todayVisit.visitLogId) {
+      // Calculate duration
+      const timeInDate = new Date();
+      const [timeInHours, timeInMinutes, timeInPeriod] = todayVisit.timeIn.split(/:| /);
+      let timeInHour = parseInt(timeInHours);
+      if (timeInPeriod === 'PM' && timeInHour !== 12) timeInHour += 12;
+      if (timeInPeriod === 'AM' && timeInHour === 12) timeInHour = 0;
+      
+      const timeOutDate = new Date();
+      const [timeOutHours, timeOutMinutes, timeOutPeriod] = currentTime.split(/:| /);
+      let timeOutHour = parseInt(timeOutHours);
+      if (timeOutPeriod === 'PM' && timeOutHour !== 12) timeOutHour += 12;
+      if (timeOutPeriod === 'AM' && timeOutHour === 12) timeOutHour = 0;
+      
+      timeInDate.setHours(timeInHour, parseInt(timeInMinutes), 0, 0);
+      timeOutDate.setHours(timeOutHour, parseInt(timeOutMinutes), 0, 0);
+      
+      const durationMs = timeOutDate - timeInDate;
+      const durationMinutes = Math.floor(durationMs / (1000 * 60));
+      const durationHours = Math.floor(durationMinutes / 60);
+      const remainingMinutes = durationMinutes % 60;
+      const visitDuration = `${durationHours}h ${remainingMinutes}m`;
+
+      console.log('🔄 Updating visit log with time out:', {
+        visitLogId: todayVisit.visitLogId,
+        timeOut: currentTime,
+        duration: visitDuration
+      });
+
+      const updatedLog = await VisitLog.findByIdAndUpdate(
+        todayVisit.visitLogId,
+        {
+          timeOut: currentTime,
+          visitDuration: visitDuration,
+          isTimerActive: false,
+          status: 'completed'
+        },
+        { new: true }
+      );
+
+      console.log('✅ Visit log updated:', updatedLog);
+    }
+
+    await visitor.save();
+
+    const visitorWithFullName = {
+      ...visitor.toObject(),
+      fullName: visitor.fullName
+    };
+
+    res.json({ 
+      message: "Time out approved and visit completed",
+      visitor: visitorWithFullName
+    });
+
+  } catch (error) {
+    console.error("Error approving time out:", error);
+    res.status(500).json({ message: "Failed to approve time out", error: error.message });
+  }
+});
+
+// APPROVE GUEST TIME IN - FIXED to always create visit log
+app.put("/guests/:id/approve-time-in", async (req, res) => {
+  try {
+    const guest = await Guest.findOne({ id: req.params.id });
+    if (!guest) return res.status(404).json({ message: "Guest not found" });
+
+    const today = new Date();
+    const todayDateString = today.toISOString().split('T')[0];
+    const currentTime = new Date().toLocaleTimeString('en-US', { 
+      hour12: true,
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    // ALWAYS CREATE NEW VISIT LOG FOR GUEST TIME IN
+    const visitLog = new VisitLog({
+      personId: guest.id,
+      personName: guest.fullName,
+      personType: 'guest',
+      prisonerId: null,
+      inmateName: null,
+      visitDate: today,
+      timeIn: currentTime,
+      isTimerActive: false,
+      status: 'in-progress'
+    });
+
+    await visitLog.save();
+
+    // Update guest record
+    guest.hasTimedIn = true;
+    guest.hasTimedOut = false;
+    guest.timeIn = currentTime;
+    guest.timeOut = null;
+    guest.lastVisitDate = today;
+    guest.dateVisited = today;
+    guest.status = 'approved';
+
+    // Add to daily visits
+    const todayVisit = {
+      visitDate: today,
+      timeIn: currentTime,
+      hasTimedIn: true,
+      hasTimedOut: false,
+      visitLogId: visitLog._id
+    };
+    
+    // Remove any existing today's visit and add new one
+    guest.dailyVisits = guest.dailyVisits.filter(visit => {
+      const visitDate = new Date(visit.visitDate).toISOString().split('T')[0];
+      return visitDate !== todayDateString;
+    });
+    guest.dailyVisits.push(todayVisit);
+
+    await guest.save();
+
+    const guestWithFullName = {
+      ...guest.toObject(),
+      fullName: guest.fullName
+    };
+
+    res.json({ 
+      message: "Guest time in approved",
+      guest: guestWithFullName,
+      visitLog: visitLog
+    });
+
+  } catch (error) {
+    console.error("Error approving guest time in:", error);
+    res.status(500).json({ message: "Failed to approve guest time in", error: error.message });
+  }
+});
+
+// APPROVE GUEST TIME OUT - FIXED to properly update visit log
+app.put("/guests/:id/approve-time-out", async (req, res) => {
+  try {
+    const guest = await Guest.findOne({ id: req.params.id });
+    if (!guest) return res.status(404).json({ message: "Guest not found" });
+
+    const today = new Date();
+    const todayDateString = today.toISOString().split('T')[0];
+    const currentTime = new Date().toLocaleTimeString('en-US', { 
+      hour12: true,
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    // Find today's visit
+    const todayVisit = guest.dailyVisits.find(visit => {
+      const visitDate = new Date(visit.visitDate).toISOString().split('T')[0];
+      return visitDate === todayDateString;
+    });
+
+    if (!todayVisit || !todayVisit.hasTimedIn) {
+      return res.status(400).json({ message: "Guest has not timed in today" });
+    }
+
+    // Update today's visit
+    todayVisit.timeOut = currentTime;
+    todayVisit.hasTimedOut = true;
+
+    // Update main guest record
+    guest.hasTimedOut = true;
+    guest.timeOut = currentTime;
+    guest.status = 'completed';
+
+    // UPDATE VISIT LOG - FIXED for guest
+    if (todayVisit.visitLogId) {
+      // Calculate duration for guest
+      const timeInDate = new Date();
+      const [timeInHours, timeInMinutes, timeInPeriod] = todayVisit.timeIn.split(/:| /);
+      let timeInHour = parseInt(timeInHours);
+      if (timeInPeriod === 'PM' && timeInHour !== 12) timeInHour += 12;
+      if (timeInPeriod === 'AM' && timeInHour === 12) timeInHour = 0;
+      
+      const timeOutDate = new Date();
+      const [timeOutHours, timeOutMinutes, timeOutPeriod] = currentTime.split(/:| /);
+      let timeOutHour = parseInt(timeOutHours);
+      if (timeOutPeriod === 'PM' && timeOutHour !== 12) timeOutHour += 12;
+      if (timeOutPeriod === 'AM' && timeOutHour === 12) timeOutHour = 0;
+      
+      timeInDate.setHours(timeInHour, parseInt(timeInMinutes), 0, 0);
+      timeOutDate.setHours(timeOutHour, parseInt(timeOutMinutes), 0, 0);
+      
+      const durationMs = timeOutDate - timeInDate;
+      const durationMinutes = Math.floor(durationMs / (1000 * 60));
+      const durationHours = Math.floor(durationMinutes / 60);
+      const remainingMinutes = durationMinutes % 60;
+      const visitDuration = `${durationHours}h ${remainingMinutes}m`;
+
+      console.log('🔄 Updating guest visit log with time out:', {
+        visitLogId: todayVisit.visitLogId,
+        timeOut: currentTime,
+        duration: visitDuration
+      });
+
+      const updatedLog = await VisitLog.findByIdAndUpdate(
+        todayVisit.visitLogId,
+        {
+          timeOut: currentTime,
+          visitDuration: visitDuration,
+          status: 'completed'
+        },
+        { new: true }
+      );
+
+      console.log('✅ Guest visit log updated:', updatedLog);
+    }
+
+    await guest.save();
+
+    const guestWithFullName = {
+      ...guest.toObject(),
+      fullName: guest.fullName
+    };
+
+    res.json({ 
+      message: "Guest time out approved",
+      guest: guestWithFullName
+    });
+
+  } catch (error) {
+    console.error("Error approving guest time out:", error);
+    res.status(500).json({ message: "Failed to approve guest time out", error: error.message });
+  }
+});
+
+// ======================
+// CLEAR TIME RECORDS ENDPOINT
+// ======================
+
+app.put("/clear-time-records/:personId", async (req, res) => {
+  try {
+    const { personId } = req.params;
+    const { date, personType } = req.body;
+
+    console.log('🔄 Clearing time records for:', { personId, personType, date });
+
+    if (!personType) {
+      return res.status(400).json({ message: "Person type is required" });
+    }
+
+    let person;
+    if (personType === 'visitor') {
+      person = await Visitor.findOne({ id: personId });
+    } else if (personType === 'guest') {
+      person = await Guest.findOne({ id: personId });
+    } else {
+      return res.status(400).json({ message: "Invalid person type" });
+    }
+
+    if (!person) {
+      return res.status(404).json({ message: "Person not found" });
+    }
+
+    // SIMPLE RESET - Just clear the main time fields
+    const updateData = {
+      hasTimedIn: false,
+      hasTimedOut: false,
+      timeIn: null,
+      timeOut: null,
+      isTimerActive: false,
+      timerStart: null,
+      timerEnd: null,
+      lastVisitDate: null,
+      dateVisited: null
+    };
+
+    let updatedPerson;
+    if (personType === 'visitor') {
+      updatedPerson = await Visitor.findOneAndUpdate(
+        { id: personId },
+        updateData,
+        { new: true }
+      );
+    } else {
+      updatedPerson = await Guest.findOneAndUpdate(
+        { id: personId },
+        updateData,
+        { new: true }
+      );
+    }
+
+    res.json({ 
+      message: `Time records cleared for ${person.fullName}. They can now scan again.`,
+      success: true,
+      person: updatedPerson
+    });
+
+  } catch (error) {
+    console.error("❌ Error clearing time records:", error);
+    res.status(500).json({ 
+      message: "Failed to clear time records", 
+      error: error.message 
+    });
+  }
+});
+
+// ======================
+// VISIT LOG ENDPOINTS
+// ======================
+
+// Get all visit logs with filtering
+app.get("/visit-logs", async (req, res) => {
+  try {
+    const { startDate, endDate, personType, personId } = req.query;
+    
+    let filter = {};
+    
+    if (startDate && endDate) {
+      filter.visitDate = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate + 'T23:59:59.999Z')
+      };
+    }
+    
+    if (personType) filter.personType = personType;
+    if (personId) filter.personId = personId;
+
+    const visitLogs = await VisitLog.find(filter).sort({ visitDate: -1, timeIn: -1 });
+    res.json(visitLogs);
+  } catch (error) {
+    console.error("Error fetching visit logs:", error);
+    res.status(500).json({ message: "Failed to fetch visit logs", error: error.message });
+  }
+});
+
+// Get active visit logs (for dashboard)
+app.get("/visit-logs/active", async (req, res) => {
+  try {
+    const activeLogs = await VisitLog.find({
+      isTimerActive: true,
+      timerEnd: { $gt: new Date() }
+    }).sort({ timerEnd: 1 });
+
+    res.json(activeLogs);
+  } catch (error) {
+    console.error("Error fetching active visit logs:", error);
+    res.status(500).json({ message: "Failed to fetch active visit logs", error: error.message });
+  }
+});
+
+// Delete visit log
+app.delete("/visit-logs/:id", async (req, res) => {
+  try {
+    const deletedLog = await VisitLog.findByIdAndDelete(req.params.id);
+    
+    if (!deletedLog) {
+      return res.status(404).json({ message: "Visit log not found" });
+    }
+    
+    res.json({ message: "Visit log deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting visit log:", error);
+    res.status(500).json({ message: "Failed to delete visit log", error: error.message });
+  }
+});
+
+// ======================
+// USER ENDPOINTS - FULL CRUD
+// ======================
+
+// CREATE USER
 app.post("/users", async (req, res) => {
   const { name, email, password, role } = req.body;
   
@@ -339,66 +1014,7 @@ app.post("/users", async (req, res) => {
   }
 });
 
-app.put("/users/:email", async (req, res) => {
-  const { name, role, password } = req.body;
-  const userEmail = req.params.email.toLowerCase();
-  
-  if (!name || !role) {
-    return res.status(400).json({ 
-      message: "Name and role are required" 
-    });
-  }
-
-  const validRoles = ['FullAdmin', 'MaleAdmin', 'FemaleAdmin', 'FullStaff', 'MaleStaff', 'FemaleStaff'];
-  if (!validRoles.includes(role)) {
-    return res.status(400).json({ 
-      message: `Invalid role. Must be one of: ${validRoles.join(', ')}` 
-    });
-  }
-
-  try {
-    const updateData = {
-      name: name.trim(),
-      role: role
-    };
-
-    if (password && password.trim() !== '') {
-      updateData.password = await bcrypt.hash(password, 10);
-    }
-
-    const updatedUser = await User.findOneAndUpdate(
-      { email: userEmail },
-      updateData,
-      { new: true, runValidators: true }
-    ).select('-password');
-
-    if (!updatedUser) {
-      return res.status(404).json({ 
-        message: "User not found" 
-      });
-    }
-    
-    res.json({ 
-      message: "User updated successfully", 
-      user: updatedUser 
-    });
-  } catch (error) {
-    console.error("User update error:", error);
-    
-    if (error.name === 'ValidationError') {
-      return res.status(400).json({ 
-        message: "Validation error", 
-        error: error.message 
-      });
-    }
-    
-    res.status(500).json({ 
-      message: "Failed to update user", 
-      error: error.message 
-    });
-  }
-});
-
+// GET ALL USERS
 app.get("/users", async (req, res) => {
   try {
     const users = await User.find().select('-password').sort({ createdAt: -1 });
@@ -412,25 +1028,68 @@ app.get("/users", async (req, res) => {
   }
 });
 
-app.delete("/users/:email", async (req, res) => {
+// GET SINGLE USER
+app.get("/users/:id", async (req, res) => {
   try {
-    const userEmail = req.params.email.toLowerCase();
+    const user = await User.findById(req.params.id).select('-password');
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.json(user);
+  } catch (error) {
+    console.error("Error fetching user:", error);
+    res.status(500).json({ 
+      message: "Failed to fetch user", 
+      error: error.message 
+    });
+  }
+});
+
+// UPDATE USER
+app.put("/users/:id", async (req, res) => {
+  try {
+    const { name, email, role, password, isActive } = req.body;
     
-    const protectedAccounts = ["fulladmin@prison.com", "system@prison.com"];
-    if (protectedAccounts.includes(userEmail)) {
-      return res.status(403).json({ 
-        message: "Cannot delete predefined system accounts" 
-      });
+    const updateData = { name, email, role, isActive };
+    
+    if (password && password.trim() !== '') {
+      updateData.password = await bcrypt.hash(password, 10);
     }
 
-    const deletedUser = await User.findOneAndDelete({ email: userEmail });
+    const updatedUser = await User.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json({ 
+      message: "User updated successfully", 
+      user: updatedUser 
+    });
+  } catch (error) {
+    console.error("Error updating user:", error);
+    res.status(500).json({ 
+      message: "Failed to update user", 
+      error: error.message 
+    });
+  }
+});
+
+// DELETE USER
+app.delete("/users/:id", async (req, res) => {
+  try {
+    const deletedUser = await User.findByIdAndDelete(req.params.id);
     if (!deletedUser) {
       return res.status(404).json({ message: "User not found" });
     }
     
     res.json({ 
       message: "User deleted successfully",
-      deletedUser: {
+      user: {
         name: deletedUser.name,
         email: deletedUser.email,
         role: deletedUser.role
@@ -445,6 +1104,7 @@ app.delete("/users/:email", async (req, res) => {
   }
 });
 
+// LOGIN
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
   
@@ -484,9 +1144,10 @@ app.post("/login", async (req, res) => {
 });
 
 // ======================
-// CRIME ENDPOINTS
+// CRIME ENDPOINTS - FULL CRUD
 // ======================
 
+// CREATE CRIME
 app.post("/crimes", async (req, res) => {
   try {
     const { crime, status = 'active' } = req.body;
@@ -526,6 +1187,7 @@ app.post("/crimes", async (req, res) => {
   }
 });
 
+// GET ALL CRIMES
 app.get("/crimes", async (req, res) => {
   try {
     const crimes = await Crime.find().sort({ createdAt: -1 });
@@ -539,13 +1201,31 @@ app.get("/crimes", async (req, res) => {
   }
 });
 
+// GET SINGLE CRIME
+app.get("/crimes/:id", async (req, res) => {
+  try {
+    const crime = await Crime.findById(req.params.id);
+    if (!crime) {
+      return res.status(404).json({ message: "Crime not found" });
+    }
+    res.json(crime);
+  } catch (error) {
+    console.error("Error fetching crime:", error);
+    res.status(500).json({ 
+      message: "Failed to fetch crime", 
+      error: error.message 
+    });
+  }
+});
+
+// UPDATE CRIME
 app.put("/crimes/:id", async (req, res) => {
   try {
-    const { id } = req.params;
+    const { crime, status } = req.body;
     
     const updatedCrime = await Crime.findByIdAndUpdate(
-      id,
-      req.body,
+      req.params.id,
+      { crime, status },
       { new: true, runValidators: true }
     );
     
@@ -553,7 +1233,10 @@ app.put("/crimes/:id", async (req, res) => {
       return res.status(404).json({ message: "Crime not found" });
     }
     
-    res.json(updatedCrime);
+    res.json({ 
+      message: "Crime updated successfully",
+      crime: updatedCrime 
+    });
   } catch (error) {
     console.error("Error updating crime:", error);
     res.status(500).json({ 
@@ -563,17 +1246,19 @@ app.put("/crimes/:id", async (req, res) => {
   }
 });
 
+// DELETE CRIME
 app.delete("/crimes/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-    
-    const deletedCrime = await Crime.findByIdAndDelete(id);
+    const deletedCrime = await Crime.findByIdAndDelete(req.params.id);
     
     if (!deletedCrime) {
       return res.status(404).json({ message: "Crime not found" });
     }
     
-    res.json({ message: "Crime deleted successfully", crime: deletedCrime });
+    res.json({ 
+      message: "Crime deleted successfully", 
+      crime: deletedCrime 
+    });
   } catch (error) {
     console.error("Error deleting crime:", error);
     res.status(500).json({ 
@@ -584,9 +1269,10 @@ app.delete("/crimes/:id", async (req, res) => {
 });
 
 // ======================
-// INMATE ENDPOINTS
+// INMATE ENDPOINTS - FULL CRUD
 // ======================
 
+// CREATE INMATE
 app.post("/inmates", 
   upload.fields([
     { name: 'frontImage', maxCount: 1 },
@@ -628,6 +1314,7 @@ app.post("/inmates",
   }
 );
 
+// GET ALL INMATES
 app.get("/inmates", async (req, res) => {
   try {
     const inmates = await Inmate.find();
@@ -641,6 +1328,7 @@ app.get("/inmates", async (req, res) => {
   }
 });
 
+// GET SINGLE INMATE
 app.get("/inmates/:code", async (req, res) => {
   try {
     const inmate = await Inmate.findOne({ inmateCode: req.params.code });
@@ -656,6 +1344,7 @@ app.get("/inmates/:code", async (req, res) => {
   }
 });
 
+// UPDATE INMATE
 app.put("/inmates/:code", 
   upload.fields([
     { name: 'frontImage', maxCount: 1 },
@@ -695,11 +1384,13 @@ app.put("/inmates/:code",
   }
 );
 
+// DELETE INMATE
 app.delete("/inmates/:code", async (req, res) => {
   try {
     const deletedInmate = await Inmate.findOneAndDelete({ inmateCode: req.params.code });
     if (!deletedInmate) return res.status(404).json({ message: "Not found" });
     
+    // Delete associated images
     ['frontImage', 'backImage', 'leftImage', 'rightImage'].forEach(imageField => {
       if (deletedInmate[imageField]) {
         const imagePath = path.join(uploadDir, deletedInmate[imageField]);
@@ -714,17 +1405,16 @@ app.delete("/inmates/:code", async (req, res) => {
 });
 
 // ======================
-// VISITOR ENDPOINTS - FIXED TIMER LOGIC
+// VISITOR ENDPOINTS - FULL CRUD
 // ======================
 
+// CREATE VISITOR
 app.post("/visitors", 
   upload.single('photo'),
   async (req, res) => {
     try {
       const seq = await autoIncrement('visitorId');
       const id = `VIS${seq}`;
-
-      console.log('Creating new visitor with data:', req.body);
 
       const visitorData = {
         ...req.body,
@@ -738,7 +1428,15 @@ app.post("/visitors",
         lastVisitDate: null,
         isTimerActive: false,
         visitApproved: false,
-        status: req.body.status || 'approved'
+        status: req.body.status || 'approved',
+        dailyVisits: [],
+        currentDayStatus: {
+          visitDate: null,
+          hasTimedIn: false,
+          hasTimedOut: false,
+          timeIn: null,
+          timeOut: null
+        }
       };
 
       if (req.file) {
@@ -782,202 +1480,6 @@ app.post("/visitors",
     }
   }
 );
-
-// FIXED: Start timer endpoint - COMPLETELY REWRITTEN
-app.put("/visitors/:id/start-timer", async (req, res) => {
-  try {
-    console.log('🚀 STARTING TIMER for visitor:', req.params.id);
-    
-    const visitor = await Visitor.findOne({ id: req.params.id });
-    if (!visitor) {
-      console.log('❌ Visitor not found:', req.params.id);
-      return res.status(404).json({ message: "Visitor not found" });
-    }
-
-    const timerStart = new Date();
-    const timerEnd = new Date(timerStart.getTime() + (3 * 60 * 60 * 1000)); // 3 hours
-
-    console.log('⏰ Timer settings:', {
-      timerStart,
-      timerEnd,
-      duration: '3 hours'
-    });
-
-    // FIXED: Update ALL necessary fields to activate timer
-    const updateData = {
-      timerStart: timerStart,
-      timerEnd: timerEnd,
-      isTimerActive: true,
-      visitApproved: true,
-      status: 'approved',
-      hasTimedIn: true,
-      lastVisitDate: new Date(),
-      dateVisited: new Date(),
-      timeIn: new Date().toLocaleTimeString('en-US', { 
-        hour12: true,
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    };
-
-    console.log('📝 Update data:', updateData);
-
-    const updatedVisitor = await Visitor.findOneAndUpdate(
-      { id: req.params.id },
-      updateData,
-      { new: true, runValidators: true }
-    );
-
-    if (!updatedVisitor) {
-      console.log('❌ Visitor not found after update');
-      return res.status(404).json({ message: "Visitor not found after update" });
-    }
-
-    // Manually calculate virtual fields since they might not be populated
-    const timeRemaining = Math.max(0, timerEnd - new Date());
-    const timeRemainingMinutes = Math.floor(timeRemaining / (1000 * 60));
-
-    const visitorWithFullName = {
-      ...updatedVisitor.toObject(),
-      fullName: updatedVisitor.fullName,
-      timeRemaining: timeRemaining,
-      timeRemainingMinutes: timeRemainingMinutes
-    };
-
-    console.log('✅ Timer started successfully:', {
-      id: visitorWithFullName.id,
-      name: visitorWithFullName.fullName,
-      isTimerActive: visitorWithFullName.isTimerActive,
-      timerStart: visitorWithFullName.timerStart,
-      timerEnd: visitorWithFullName.timerEnd,
-      timeRemainingMinutes: visitorWithFullName.timeRemainingMinutes
-    });
-
-    res.json(visitorWithFullName);
-  } catch (error) {
-    console.error("❌ Error starting timer:", error);
-    res.status(500).json({ 
-      message: "Failed to start timer", 
-      error: error.message,
-      stack: error.stack
-    });
-  }
-});
-
-// Stop timer
-app.put("/visitors/:id/stop-timer", async (req, res) => {
-  try {
-    const visitor = await Visitor.findOne({ id: req.params.id });
-    if (!visitor) return res.status(404).json({ message: "Visitor not found" });
-
-    const updatedVisitor = await Visitor.findOneAndUpdate(
-      { id: req.params.id },
-      {
-        isTimerActive: false,
-        timerEnd: new Date(),
-        hasTimedOut: true,
-        timeOut: new Date().toLocaleTimeString('en-US', { 
-          hour12: true,
-          hour: '2-digit',
-          minute: '2-digit'
-        })
-      },
-      { new: true, runValidators: true }
-    );
-
-    const visitorWithFullName = {
-      ...updatedVisitor.toObject(),
-      fullName: updatedVisitor.fullName
-    };
-
-    res.json(visitorWithFullName);
-  } catch (error) {
-    console.error("Error stopping timer:", error);
-    res.status(500).json({ message: "Failed to stop timer", error: error.message });
-  }
-});
-
-// Get active timers for dashboard - FIXED QUERY
-app.get("/visitors/active-timers", async (req, res) => {
-  try {
-    console.log('🔍 Fetching active timers...');
-    
-    const activeVisitors = await Visitor.find({
-      isTimerActive: true,
-      timerEnd: { $gt: new Date() }
-    });
-
-    console.log(`✅ Found ${activeVisitors.length} active visitors with timers`);
-
-    // Manually calculate time remaining for each visitor
-    const visitorsWithTimers = activeVisitors.map(visitor => {
-      const timeRemaining = Math.max(0, new Date(visitor.timerEnd) - new Date());
-      const timeRemainingMinutes = Math.floor(timeRemaining / (1000 * 60));
-      
-      return {
-        ...visitor.toObject(),
-        fullName: visitor.fullName,
-        timeRemaining: timeRemaining,
-        timeRemainingMinutes: timeRemainingMinutes
-      };
-    });
-
-    // Sort by time remaining (ascending - least time first)
-    const sortedVisitors = visitorsWithTimers.sort((a, b) => a.timeRemainingMinutes - b.timeRemainingMinutes);
-
-    console.log('📊 Active timers summary:');
-    sortedVisitors.forEach(visitor => {
-      console.log(`   ⏰ ${visitor.fullName}: ${visitor.timeRemainingMinutes} minutes remaining`);
-    });
-
-    res.json(sortedVisitors);
-  } catch (error) {
-    console.error("❌ Error fetching active timers:", error);
-    res.status(500).json({ 
-      message: "Failed to fetch active timers", 
-      error: error.message 
-    });
-  }
-});
-
-// Reset time records for a visitor
-app.put("/visitors/:id/reset-time", async (req, res) => {
-  try {
-    const visitor = await Visitor.findOne({ id: req.params.id });
-    if (!visitor) return res.status(404).json({ message: "Visitor not found" });
-
-    const updatedVisitor = await Visitor.findOneAndUpdate(
-      { id: req.params.id },
-      {
-        hasTimedIn: false,
-        hasTimedOut: false,
-        timeIn: null,
-        timeOut: null,
-        dateVisited: null,
-        isTimerActive: false,
-        timerStart: null,
-        timerEnd: null
-      },
-      { new: true, runValidators: true }
-    );
-
-    const visitorWithFullName = {
-      ...updatedVisitor.toObject(),
-      fullName: updatedVisitor.fullName
-    };
-
-    res.json({ 
-      message: "Time records reset successfully", 
-      visitor: visitorWithFullName 
-    });
-  } catch (error) {
-    console.error("Error resetting time records:", error);
-    res.status(500).json({ 
-      message: "Failed to reset time records", 
-      error: error.message 
-    });
-  }
-});
 
 // GET ALL VISITORS
 app.get("/visitors", async (req, res) => {
@@ -1055,38 +1557,105 @@ app.delete("/visitors/:id", async (req, res) => {
   }
 });
 
-// Debug endpoint to check ALL visitors timer status
-app.get("/visitors-debug/timers", async (req, res) => {
+// Get active timers from visit logs for dashboard
+app.get("/visit-logs/active-timers", async (req, res) => {
   try {
-    const allVisitors = await Visitor.find();
-    
-    const debugInfo = allVisitors.map(visitor => ({
-      id: visitor.id,
-      name: visitor.fullName,
-      hasTimedIn: visitor.hasTimedIn,
-      hasTimedOut: visitor.hasTimedOut,
-      isTimerActive: visitor.isTimerActive,
-      timerStart: visitor.timerStart,
-      timerEnd: visitor.timerEnd,
-      timeIn: visitor.timeIn,
-      timeOut: visitor.timeOut,
-      status: visitor.status
-    }));
-
-    console.log('🔍 DEBUG - All visitors timer status:');
-    debugInfo.forEach(visitor => {
-      console.log(`   ${visitor.id} - ${visitor.name}: TimerActive=${visitor.isTimerActive}, HasTimedIn=${visitor.hasTimedIn}`);
+    const activeVisitLogs = await VisitLog.find({
+      isTimerActive: true,
+      timerEnd: { $gt: new Date() },
+      status: 'in-progress'
     });
 
-    res.json(debugInfo);
+    const activeTimersWithDetails = await Promise.all(
+      activeVisitLogs.map(async (log) => {
+        let person;
+        
+        if (log.personType === 'visitor') {
+          person = await Visitor.findOne({ id: log.personId });
+        } else {
+          person = await Guest.findOne({ id: log.personId });
+        }
+
+        const timeRemaining = Math.max(0, new Date(log.timerEnd) - new Date());
+        const timeRemainingMinutes = Math.floor(timeRemaining / (1000 * 60));
+        
+        return {
+          ...log.toObject(),
+          fullName: log.personName,
+          timeRemaining: timeRemaining,
+          timeRemainingMinutes: timeRemainingMinutes,
+          prisonerId: log.prisonerId,
+          timeIn: log.timeIn,
+          // Include person details if available
+          photo: person?.photo,
+          contact: person?.contact
+        };
+      })
+    );
+
+    const sortedTimers = activeTimersWithDetails.sort((a, b) => a.timeRemainingMinutes - b.timeRemainingMinutes);
+    res.json(sortedTimers);
   } catch (error) {
-    console.error("Error in debug endpoint:", error);
-    res.status(500).json({ message: "Debug failed", error: error.message });
+    console.error("Error fetching active timers from visit logs:", error);
+    res.status(500).json({ 
+      message: "Failed to fetch active timers", 
+      error: error.message 
+    });
+  }
+});
+
+// Get active VISITOR timers only (not guests) for dashboard
+app.get("/visit-logs/active-visitor-timers", async (req, res) => {
+  try {
+    const activeVisitLogs = await VisitLog.find({
+      personType: 'visitor', // ONLY VISITORS
+      isTimerActive: true,
+      timerEnd: { $gt: new Date() },
+      status: 'in-progress',
+      timeOut: null // Only those who haven't timed out
+    });
+
+    console.log('🔍 Found active VISITOR timers:', activeVisitLogs.length);
+
+    const activeTimersWithDetails = await Promise.all(
+      activeVisitLogs.map(async (log) => {
+        try {
+          const timeRemaining = Math.max(0, new Date(log.timerEnd) - new Date());
+          const timeRemainingMinutes = Math.floor(timeRemaining / (1000 * 60));
+          
+          return {
+            ...log.toObject(),
+            fullName: log.personName,
+            timeRemaining: timeRemaining,
+            timeRemainingMinutes: timeRemainingMinutes,
+            prisonerId: log.prisonerId,
+            inmateName: log.inmateName,
+            timeIn: log.timeIn
+          };
+        } catch (error) {
+          console.warn(`⚠️ Error processing timer for ${log.personId}:`, error);
+          return null;
+        }
+      })
+    );
+
+    // Filter out any null entries and sort by time remaining (most urgent first)
+    const validTimers = activeTimersWithDetails.filter(timer => timer !== null);
+    const sortedTimers = validTimers.sort((a, b) => a.timeRemainingMinutes - b.timeRemainingMinutes);
+    
+    console.log('✅ Sending active VISITOR timers:', sortedTimers.length);
+    res.json(sortedTimers);
+  } catch (error) {
+    console.error("❌ Error fetching active VISITOR timers:", error);
+    res.status(500).json({ 
+      message: "Failed to fetch active visitor timers", 
+      error: error.message 
+    });
   }
 });
 
 // ======================
-// GUEST ENDPOINTS
+// GUEST ENDPOINTS - FULL CRUD
 // ======================
 
 // CREATE GUEST
@@ -1096,8 +1665,6 @@ app.post("/guests",
     try {
       const seq = await autoIncrement('guestId');
       const id = `GST${seq}`;
-
-      console.log('Creating new guest with data:', req.body);
 
       const guestData = {
         ...req.body,
@@ -1109,7 +1676,15 @@ app.post("/guests",
         timeOut: null,
         dateVisited: null,
         lastVisitDate: null,
-        status: req.body.status || 'pending'
+        status: req.body.status || 'pending',
+        dailyVisits: [],
+        currentDayStatus: {
+          visitDate: null,
+          hasTimedIn: false,
+          hasTimedOut: false,
+          timeIn: null,
+          timeOut: null
+        }
       };
 
       if (req.file) {
@@ -1231,78 +1806,6 @@ app.delete("/guests/:id", async (req, res) => {
   }
 });
 
-// GUEST TIME IN
-app.put("/guests/:id/time-in", async (req, res) => {
-  try {
-    const guest = await Guest.findOne({ id: req.params.id });
-    if (!guest) return res.status(404).json({ message: "Guest not found" });
-
-    const currentTime = new Date().toLocaleTimeString('en-US', { 
-      hour12: true,
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-    
-    const currentDate = new Date();
-
-    const updatedGuest = await Guest.findOneAndUpdate(
-      { id: req.params.id },
-      {
-        hasTimedIn: true,
-        timeIn: currentTime,
-        lastVisitDate: currentDate,
-        dateVisited: currentDate,
-        status: 'approved'
-      },
-      { new: true, runValidators: true }
-    );
-
-    const guestWithFullName = {
-      ...updatedGuest.toObject(),
-      fullName: updatedGuest.fullName
-    };
-
-    res.json(guestWithFullName);
-  } catch (error) {
-    console.error("Error processing guest time in:", error);
-    res.status(500).json({ message: "Failed to process time in", error: error.message });
-  }
-});
-
-// GUEST TIME OUT
-app.put("/guests/:id/time-out", async (req, res) => {
-  try {
-    const guest = await Guest.findOne({ id: req.params.id });
-    if (!guest) return res.status(404).json({ message: "Guest not found" });
-
-    const currentTime = new Date().toLocaleTimeString('en-US', { 
-      hour12: true,
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-
-    const updatedGuest = await Guest.findOneAndUpdate(
-      { id: req.params.id },
-      {
-        hasTimedOut: true,
-        timeOut: currentTime,
-        status: 'completed'
-      },
-      { new: true, runValidators: true }
-    );
-
-    const guestWithFullName = {
-      ...updatedGuest.toObject(),
-      fullName: updatedGuest.fullName
-    };
-
-    res.json(guestWithFullName);
-  } catch (error) {
-    console.error("Error processing guest time out:", error);
-    res.status(500).json({ message: "Failed to process time out", error: error.message });
-  }
-});
-
 // ======================
 // HEALTH CHECK
 // ======================
@@ -1321,4 +1824,792 @@ app.listen(PORT, () => {
   console.log(`📁 Upload directory: ${uploadDir}`);
   console.log(`🖼️ Access images at: http://localhost:${PORT}/uploads/filename`);
   console.log(`⏰ Timer system: ACTIVE - 3-hour visit duration`);
+  console.log(`🔍 Smart scanning: ENABLED - Daily visit limits enforced`);
+  console.log(`📊 Full CRUD operations: ENABLED for all entities`);
+});
+
+// ======================
+// DEBUG ENDPOINTS - Add these to your backend
+// ======================
+
+// DEBUG: Get all QR data for testing
+app.get("/debug-qr-codes", async (req, res) => {
+  try {
+    const visitors = await Visitor.find().select('id lastName firstName prisonerId qrCode');
+    const guests = await Guest.find().select('id lastName firstName visitPurpose qrCode');
+    
+    const visitorQRCodes = visitors.map(v => ({
+      id: v.id,
+      name: v.fullName,
+      type: 'visitor',
+      prisonerId: v.prisonerId,
+      qrData: v.qrCode ? 'Generated' : 'Missing'
+    }));
+    
+    const guestQRCodes = guests.map(g => ({
+      id: g.id,
+      name: g.fullName,
+      type: 'guest',
+      visitPurpose: g.visitPurpose,
+      qrData: g.qrCode ? 'Generated' : 'Missing'
+    }));
+    
+    res.json({
+      visitors: visitorQRCodes,
+      guests: guestQRCodes,
+      totalVisitors: visitors.length,
+      totalGuests: guests.length
+    });
+  } catch (error) {
+    console.error("QR codes debug error:", error);
+    res.status(500).json({ message: "Failed to get QR codes", error: error.message });
+  }
+});
+
+// DEBUG: Test QR code generation and parsing
+app.post("/debug-qr", async (req, res) => {
+  try {
+    const { personId, isGuest, lastName, firstName, prisonerId, visitPurpose } = req.body;
+    
+    const qrData = {
+      id: personId,
+      lastName,
+      firstName,
+      prisonerId: isGuest ? null : prisonerId,
+      type: isGuest ? 'guest' : 'visitor',
+      visitPurpose: isGuest ? visitPurpose : null
+    };
+
+    const qrCode = await generateQRCode(qrData);
+    
+    res.json({
+      originalData: qrData,
+      qrCode: qrCode,
+      parsedData: JSON.stringify(qrData),
+      message: "QR data generated successfully"
+    });
+  } catch (error) {
+    console.error("QR debug error:", error);
+    res.status(500).json({ message: "QR debug failed", error: error.message });
+  }
+});
+
+// DEBUG: Check if scan-process endpoint is working
+app.get("/debug-scan-process", async (req, res) => {
+  try {
+    res.json({ 
+      message: "Scan process endpoint is accessible",
+      timestamp: new Date().toISOString(),
+      status: "active"
+    });
+  } catch (error) {
+    console.error("Scan process debug error:", error);
+    res.status(500).json({ message: "Scan process debug failed", error: error.message });
+  }
+});
+
+// DEBUG: Check if visit logs are being created
+app.get("/debug-visit-logs", async (req, res) => {
+  try {
+    const visitLogs = await VisitLog.find().sort({ createdAt: -1 });
+    
+    res.json({
+      totalLogs: visitLogs.length,
+      logs: visitLogs.map(log => ({
+        id: log._id,
+        personId: log.personId,
+        personName: log.personName,
+        visitDate: log.visitDate,
+        timeIn: log.timeIn,
+        timeOut: log.timeOut,
+        status: log.status,
+        createdAt: log.createdAt
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ======================
+// BACKUP & MAINTENANCE ENDPOINTS - KEEP USERS BUT PRESERVE ENCRYPTED PASSWORDS
+// ======================
+
+const { Parser } = require('json2csv');
+
+// Backup directory
+const backupDir = path.join(__dirname, 'backups');
+if (!fs.existsSync(backupDir)) {
+  fs.mkdirSync(backupDir, { recursive: true });
+}
+
+// SECURE: Remove only truly sensitive fields, but KEEP encrypted passwords
+const removeSensitiveFields = (data, modelName) => {
+  if (!data || typeof data !== 'object') return data;
+  
+  // Remove fields that could expose security, but KEEP encrypted passwords
+  const sensitiveFields = ['qrCode', 'photo', 'frontImage', 'backImage', 'leftImage', 'rightImage'];
+  
+  if (Array.isArray(data)) {
+    return data.map(item => removeSensitiveFields(item, modelName));
+  }
+  
+  const cleaned = { ...data };
+  sensitiveFields.forEach(field => {
+    if (cleaned[field] !== undefined) {
+      delete cleaned[field];
+    }
+  });
+  
+  return cleaned;
+};
+
+// Get all backups
+app.get("/backups", async (req, res) => {
+  try {
+    if (!fs.existsSync(backupDir)) {
+      return res.json({ backups: [], stats: {} });
+    }
+
+    const files = fs.readdirSync(backupDir)
+      .filter(file => file.endsWith('.json') || file.endsWith('.csv'))
+      .map(file => {
+        const filePath = path.join(backupDir, file);
+        const stats = fs.statSync(filePath);
+        return {
+          filename: file,
+          createdAt: stats.birthtime,
+          size: stats.size,
+          format: file.endsWith('.json') ? 'json' : 'csv'
+        };
+      })
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+    const lastBackup = files.length > 0 ? files[0].createdAt : null;
+
+    res.json({
+      backups: files,
+      stats: {
+        totalBackups: files.length,
+        totalSize,
+        lastBackup,
+        storageUsage: Math.min(100, (totalSize / (100 * 1024 * 1024)) * 100),
+        collectionsCount: 7
+      }
+    });
+  } catch (error) {
+    console.error("Backup list error:", error);
+    res.status(500).json({ message: "Failed to list backups", error: error.message });
+  }
+});
+
+// Create backup - KEEP USERS WITH ENCRYPTED PASSWORDS
+app.post("/backups/create", async (req, res) => {
+  try {
+    const { format = 'json' } = req.body;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `backup-${timestamp}.${format}`;
+    const filePath = path.join(backupDir, filename);
+
+    const models = {
+      'User': User,
+      'Crime': Crime, 
+      'Inmate': Inmate,
+      'Visitor': Visitor,
+      'Guest': Guest,
+      'VisitLog': VisitLog,
+      'Counter': Counter
+    };
+
+    const backupData = {
+      metadata: {
+        timestamp: new Date().toISOString(),
+        database: 'prison_db',
+        version: '1.0',
+        collections: Object.keys(models),
+        security: {
+          passwords: 'encrypted', // Passwords remain bcrypt hashed
+          sensitiveFieldsRemoved: ['qrCode', 'images'] // Only these are removed
+        }
+      },
+      data: {}
+    };
+
+    for (const [modelName, Model] of Object.entries(models)) {
+      try {
+        const data = await Model.find({});
+        // KEEP encrypted passwords, only remove other sensitive fields
+        const cleanedData = removeSensitiveFields(data, modelName);
+        backupData.data[modelName] = cleanedData;
+        console.log(`✓ Backed up ${cleanedData.length} records from ${modelName} (passwords encrypted)`);
+      } catch (error) {
+        console.warn(`⚠️ Could not backup ${modelName}:`, error.message);
+        backupData.data[modelName] = [];
+      }
+    }
+
+    if (format === 'csv') {
+      let csvContent = '';
+      for (const [collectionName, data] of Object.entries(backupData.data)) {
+        if (data.length > 0) {
+          try {
+            const fields = Object.keys(data[0]);
+            const parser = new Parser({ fields });
+            const csv = parser.parse(data);
+            csvContent += `=== ${collectionName} ===\n`;
+            csvContent += csv + '\n\n';
+          } catch (error) {
+            console.warn(`Could not convert ${collectionName} to CSV:`, error);
+            csvContent += `=== ${collectionName} ===\n`;
+            csvContent += 'Error converting to CSV\n\n';
+          }
+        }
+      }
+      fs.writeFileSync(filePath, csvContent);
+    } else {
+      fs.writeFileSync(filePath, JSON.stringify(backupData, null, 2));
+    }
+
+    const stats = fs.statSync(filePath);
+
+    res.json({
+      message: "Backup created successfully with encrypted passwords preserved",
+      filename,
+      size: stats.size,
+      collections: Object.keys(backupData.data),
+      recordCount: Object.values(backupData.data).reduce((sum, arr) => sum + arr.length, 0),
+      security: {
+        passwords: 'encrypted (bcrypt)',
+        sensitiveDataRemoved: ['qrCodes', 'images']
+      }
+    });
+  } catch (error) {
+    console.error("Backup creation error:", error);
+    res.status(500).json({ message: "Backup creation failed", error: error.message });
+  }
+});
+
+// Download backup
+app.get("/backups/download/:filename", (req, res) => {
+  try {
+    const filename = req.params.filename;
+    
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      return res.status(400).json({ message: "Invalid filename" });
+    }
+
+    const filePath = path.join(backupDir, filename);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ message: "Backup file not found" });
+    }
+
+    res.download(filePath, filename, (err) => {
+      if (err) {
+        console.error("Download error:", err);
+        res.status(500).json({ message: "Download failed" });
+      }
+    });
+  } catch (error) {
+    console.error("Backup download error:", error);
+    res.status(500).json({ message: "Download failed", error: error.message });
+  }
+});
+
+// Delete backup
+app.delete("/backups/:filename", (req, res) => {
+  try {
+    const filename = req.params.filename;
+    
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      return res.status(400).json({ message: "Invalid filename" });
+    }
+
+    const filePath = path.join(backupDir, filename);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ message: "Backup file not found" });
+    }
+
+    fs.unlinkSync(filePath);
+    res.json({ message: "Backup deleted successfully" });
+  } catch (error) {
+    console.error("Backup deletion error:", error);
+    res.status(500).json({ message: "Deletion failed", error: error.message });
+  }
+});
+
+// Restore backup - PRESERVE EXISTING ENCRYPTED PASSWORDS
+app.post("/backups/restore/:filename", async (req, res) => {
+  try {
+    const filename = req.params.filename;
+    const filePath = path.join(backupDir, filename);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ message: "Backup file not found" });
+    }
+
+    const backupData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    
+    if (!backupData.data) {
+      return res.status(400).json({ message: "Invalid backup file format" });
+    }
+
+    const models = {
+      'User': User,
+      'Crime': Crime,
+      'Inmate': Inmate,
+      'Visitor': Visitor,
+      'Guest': Guest,
+      'VisitLog': VisitLog,
+      'Counter': Counter
+    };
+
+    const results = {
+      restored: {},
+      errors: {},
+      warnings: {}
+    };
+
+    // Restore each collection
+    for (const [modelName, data] of Object.entries(backupData.data)) {
+      if (models[modelName] && Array.isArray(data)) {
+        try {
+          const Model = models[modelName];
+          
+          // Clear existing data
+          await Model.deleteMany({});
+          
+          // Handle special cases for restoration
+          let dataToRestore = data;
+          
+          // If restoring Visitors/Guests, regenerate QR codes (they were removed for security)
+          if (modelName === 'Visitor' || modelName === 'Guest') {
+            dataToRestore = await Promise.all(data.map(async (personData) => {
+              const qrData = {
+                id: personData.id,
+                lastName: personData.lastName,
+                firstName: personData.firstName,
+                middleName: personData.middleName,
+                extension: personData.extension,
+                ...(modelName === 'Visitor' ? { prisonerId: personData.prisonerId } : { visitPurpose: personData.visitPurpose, type: 'guest' })
+              };
+              
+              const newQrCode = await generateQRCode(qrData);
+              return {
+                ...personData,
+                qrCode: newQrCode
+              };
+            }));
+            console.log(`✓ Regenerated QR codes for ${dataToRestore.length} ${modelName} records`);
+          }
+          
+          // Insert backup data
+          if (dataToRestore.length > 0) {
+            await Model.insertMany(dataToRestore);
+          }
+          
+          results.restored[modelName] = dataToRestore.length;
+          console.log(`✓ Restored ${dataToRestore.length} documents to ${modelName}`);
+        } catch (error) {
+          results.errors[modelName] = error.message;
+          console.error(`❌ Error restoring ${modelName}:`, error);
+        }
+      }
+    }
+
+    res.json({ 
+      message: "Database restore completed successfully",
+      results: results,
+      security: {
+        passwords: "Encrypted passwords preserved",
+        qrCodes: "Regenerated for visitors/guests"
+      }
+    });
+
+  } catch (error) {
+    console.error("Restore error:", error);
+    res.status(500).json({ message: "Restore failed", error: error.message });
+  }
+});
+
+// Quick backup - KEEP USERS WITH ENCRYPTED PASSWORDS
+app.post("/backups/quick", async (req, res) => {
+  try {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `quick-backup-${timestamp}.json`;
+    const filePath = path.join(backupDir, filename);
+
+    const essentialModels = {
+      'User': User,
+      'Inmate': Inmate,
+      'Visitor': Visitor,
+      'Guest': Guest
+    };
+
+    const backupData = {
+      metadata: {
+        timestamp: new Date().toISOString(),
+        type: 'quick',
+        collections: Object.keys(essentialModels),
+        security: {
+          passwords: 'encrypted (bcrypt)',
+          sensitiveFieldsRemoved: ['qrCode', 'images']
+        }
+      },
+      data: {}
+    };
+
+    for (const [modelName, Model] of Object.entries(essentialModels)) {
+      try {
+        const data = await Model.find({});
+        const cleanedData = removeSensitiveFields(data, modelName);
+        backupData.data[modelName] = cleanedData;
+      } catch (error) {
+        console.warn(`Could not backup ${modelName}:`, error.message);
+        backupData.data[modelName] = [];
+      }
+    }
+
+    fs.writeFileSync(filePath, JSON.stringify(backupData, null, 2));
+    const stats = fs.statSync(filePath);
+
+    res.json({
+      message: "Quick backup created with encrypted passwords",
+      filename,
+      size: `${(stats.size / 1024 / 1024).toFixed(2)} MB`,
+      records: Object.values(backupData.data).reduce((sum, arr) => sum + arr.length, 0),
+      security: "Passwords encrypted, sensitive data removed"
+    });
+  } catch (error) {
+    console.error("Quick backup error:", error);
+    res.status(500).json({ message: "Quick backup failed", error: error.message });
+  }
+});
+
+// Database statistics
+app.get("/database/stats", async (req, res) => {
+  try {
+    const models = {
+      'User': User,
+      'Crime': Crime,
+      'Inmate': Inmate,
+      'Visitor': Visitor,
+      'Guest': Guest,
+      'VisitLog': VisitLog,
+      'Counter': Counter
+    };
+
+    const stats = {
+      totalCollections: Object.keys(models).length,
+      collectionStats: {},
+      totalRecords: 0
+    };
+
+    for (const [modelName, Model] of Object.entries(models)) {
+      try {
+        const count = await Model.countDocuments();
+        stats.collectionStats[modelName] = count;
+        stats.totalRecords += count;
+      } catch (error) {
+        stats.collectionStats[modelName] = 'Error: ' + error.message;
+      }
+    }
+
+    res.json(stats);
+  } catch (error) {
+    console.error("Stats error:", error);
+    res.status(500).json({ message: "Failed to get stats", error: error.message });
+  }
+});
+
+// System health check
+app.get("/health", async (req, res) => {
+  try {
+    const dbState = mongoose.connection.readyState;
+    const dbStatus = dbState === 1 ? 'connected' : 'disconnected';
+
+    let backupStats = { count: 0, totalSize: '0 MB' };
+    try {
+      if (fs.existsSync(backupDir)) {
+        const files = fs.readdirSync(backupDir)
+          .filter(file => file.endsWith('.json') || file.endsWith('.csv'));
+        
+        const totalSize = files.reduce((sum, file) => {
+          const filePath = path.join(backupDir, file);
+          return sum + (fs.existsSync(filePath) ? fs.statSync(filePath).size : 0);
+        }, 0);
+
+        backupStats = {
+          count: files.length,
+          totalSize: `${(totalSize / (1024 * 1024)).toFixed(2)} MB`
+        };
+      }
+    } catch (e) {
+      console.warn('Could not calculate backup stats:', e.message);
+    }
+
+    res.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      database: dbStatus,
+      backups: backupStats,
+      memory: {
+        used: `${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2)} MB`,
+        total: `${(process.memoryUsage().heapTotal / 1024 / 1024).toFixed(2)} MB`
+      },
+      security: {
+        backupSecurity: 'Encrypted passwords preserved in backups',
+        dataProtection: 'QR codes and images removed for security'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'unhealthy',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// ======================
+// VIOLATION ENDPOINTS
+// ======================
+
+// Add violation to visitor
+app.put("/visitors/:id/violation", async (req, res) => {
+  try {
+    const { violationType, violationDetails } = req.body;
+    
+    const updatedVisitor = await Visitor.findOneAndUpdate(
+      { id: req.params.id },
+      {
+        violationType,
+        violationDetails,
+        violationDate: new Date()
+      },
+      { new: true }
+    );
+
+    if (!updatedVisitor) {
+      return res.status(404).json({ message: "Visitor not found" });
+    }
+
+    res.json({ 
+      message: "Violation added successfully",
+      visitor: updatedVisitor
+    });
+  } catch (error) {
+    console.error("Error adding violation to visitor:", error);
+    res.status(500).json({ message: "Failed to add violation", error: error.message });
+  }
+});
+
+// Add violation to guest
+app.put("/guests/:id/violation", async (req, res) => {
+  try {
+    const { violationType, violationDetails } = req.body;
+    
+    const updatedGuest = await Guest.findOneAndUpdate(
+      { id: req.params.id },
+      {
+        violationType,
+        violationDetails,
+        violationDate: new Date()
+      },
+      { new: true }
+    );
+
+    if (!updatedGuest) {
+      return res.status(404).json({ message: "Guest not found" });
+    }
+
+    res.json({ 
+      message: "Violation added successfully",
+      guest: updatedGuest
+    });
+  } catch (error) {
+    console.error("Error adding violation to guest:", error);
+    res.status(500).json({ message: "Failed to add violation", error: error.message });
+  }
+});
+
+// Remove violation from visitor
+app.put("/visitors/:id/remove-violation", async (req, res) => {
+  try {
+    const updatedVisitor = await Visitor.findOneAndUpdate(
+      { id: req.params.id },
+      {
+        violationType: null,
+        violationDetails: null,
+        violationDate: null
+      },
+      { new: true }
+    );
+
+    if (!updatedVisitor) {
+      return res.status(404).json({ message: "Visitor not found" });
+    }
+
+    res.json({ 
+      message: "Violation removed successfully",
+      visitor: updatedVisitor
+    });
+  } catch (error) {
+    console.error("Error removing violation from visitor:", error);
+    res.status(500).json({ message: "Failed to remove violation", error: error.message });
+  }
+});
+
+// Remove violation from guest
+app.put("/guests/:id/remove-violation", async (req, res) => {
+  try {
+    const updatedGuest = await Guest.findOneAndUpdate(
+      { id: req.params.id },
+      {
+        violationType: null,
+        violationDetails: null,
+        violationDate: null
+      },
+      { new: true }
+    );
+
+    if (!updatedGuest) {
+      return res.status(404).json({ message: "Guest not found" });
+    }
+
+    res.json({ 
+      message: "Violation removed successfully",
+      guest: updatedGuest
+    });
+  } catch (error) {
+    console.error("Error removing violation from guest:", error);
+    res.status(500).json({ message: "Failed to remove violation", error: error.message });
+  }
+});
+
+// ======================
+// BAN ENDPOINTS
+// ======================
+
+// Ban visitor
+app.put("/visitors/:id/ban", async (req, res) => {
+  try {
+    const { reason, duration, notes } = req.body;
+    
+    const updatedVisitor = await Visitor.findOneAndUpdate(
+      { id: req.params.id },
+      {
+        isBanned: true,
+        banReason: reason,
+        banDuration: duration,
+        banNotes: notes,
+        banDate: new Date()
+      },
+      { new: true }
+    );
+
+    if (!updatedVisitor) {
+      return res.status(404).json({ message: "Visitor not found" });
+    }
+
+    res.json({ 
+      message: "Visitor banned successfully",
+      visitor: updatedVisitor
+    });
+  } catch (error) {
+    console.error("Error banning visitor:", error);
+    res.status(500).json({ message: "Failed to ban visitor", error: error.message });
+  }
+});
+
+// Ban guest
+app.put("/guests/:id/ban", async (req, res) => {
+  try {
+    const { reason, duration, notes } = req.body;
+    
+    const updatedGuest = await Guest.findOneAndUpdate(
+      { id: req.params.id },
+      {
+        isBanned: true,
+        banReason: reason,
+        banDuration: duration,
+        banNotes: notes,
+        banDate: new Date()
+      },
+      { new: true }
+    );
+
+    if (!updatedGuest) {
+      return res.status(404).json({ message: "Guest not found" });
+    }
+
+    res.json({ 
+      message: "Guest banned successfully",
+      guest: updatedGuest
+    });
+  } catch (error) {
+    console.error("Error banning guest:", error);
+    res.status(500).json({ message: "Failed to ban guest", error: error.message });
+  }
+});
+
+// Remove ban from visitor
+app.put("/visitors/:id/remove-ban", async (req, res) => {
+  try {
+    const updatedVisitor = await Visitor.findOneAndUpdate(
+      { id: req.params.id },
+      {
+        isBanned: false,
+        banReason: null,
+        banDuration: null,
+        banNotes: null,
+        banDate: null
+      },
+      { new: true }
+    );
+
+    if (!updatedVisitor) {
+      return res.status(404).json({ message: "Visitor not found" });
+    }
+
+    res.json({ 
+      message: "Ban removed successfully",
+      visitor: updatedVisitor
+    });
+  } catch (error) {
+    console.error("Error removing ban from visitor:", error);
+    res.status(500).json({ message: "Failed to remove ban", error: error.message });
+  }
+});
+
+// Remove ban from guest
+app.put("/guests/:id/remove-ban", async (req, res) => {
+  try {
+    const updatedGuest = await Guest.findOneAndUpdate(
+      { id: req.params.id },
+      {
+        isBanned: false,
+        banReason: null,
+        banDuration: null,
+        banNotes: null,
+        banDate: null
+      },
+      { new: true }
+    );
+
+    if (!updatedGuest) {
+      return res.status(404).json({ message: "Guest not found" });
+    }
+
+    res.json({ 
+      message: "Ban removed successfully",
+      guest: updatedGuest
+    });
+  } catch (error) {
+    console.error("Error removing ban from guest:", error);
+    res.status(500).json({ message: "Failed to remove ban", error: error.message });
+  }
 });

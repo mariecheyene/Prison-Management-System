@@ -810,7 +810,6 @@ const Visitors = () => {
       <th>Relationship</th>
       <th>Last Visit Date</th>
       <th>Time Status</th>
-      <th>Status</th>
       <th>Violation Type</th>
       <th style={{ width: '120px' }}>Actions</th>
     </tr>
@@ -835,11 +834,6 @@ const Visitors = () => {
         <td>
           <Badge bg={getTimeStatus(visitor).variant}>
             {getTimeStatus(visitor).text}
-          </Badge>
-        </td>
-        <td>
-          <Badge bg={getStatusVariant(visitor.status)}>
-            {visitor.status}
           </Badge>
         </td>
         <td>

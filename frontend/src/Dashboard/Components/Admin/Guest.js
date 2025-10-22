@@ -13,14 +13,9 @@ import {
   Edit2, 
   Trash2, 
   Download,
-  Upload,
   Printer,
   User,
-  Grid,
-  Calendar,
-  CheckCircle,
-  XCircle,
-  Clock
+  Grid
 } from 'react-feather';
 
 const Guest = () => {
@@ -42,7 +37,7 @@ const Guest = () => {
     { value: 'firstName', label: 'First Name' },
     { value: 'id', label: 'Guest ID' },
     { value: 'visitPurpose', label: 'Visit Purpose' },
-    { value: 'status', label: 'Status' }
+    { value: 'violationType', label: 'Violation Type' }
   ];
 
   useEffect(() => {
@@ -57,6 +52,7 @@ const Guest = () => {
     setIsLoading(true);
     try {
       const response = await axios.get("http://localhost:5000/guests");
+      // REMOVED THE FILTER - NOW SHOWS ALL GUESTS
       setGuests(response.data);
     } catch (error) {
       console.error("Error fetching guests:", error);
@@ -94,7 +90,7 @@ const Guest = () => {
       address: '',
       contact: '',
       visitPurpose: '',
-      status: 'pending'
+      status: 'approved'
     };
     setFormData(initialData);
     setImageFile(null);
@@ -150,7 +146,7 @@ const Guest = () => {
     address: '',
     contact: '',
     visitPurpose: '',
-    status: 'pending'
+    status: 'approved'
   });
 
   const handleInputChange = (e) => {
@@ -160,7 +156,6 @@ const Guest = () => {
       [name]: value
     }));
 
-    // Auto-calculate age if dateOfBirth changes
     if (name === 'dateOfBirth' && value) {
       const birthDate = new Date(value);
       const today = new Date();
@@ -182,7 +177,6 @@ const Guest = () => {
     e.preventDefault();
     setIsLoading(true);
 
-    // Validate required fields
     if (!formData.lastName || !formData.firstName || !formData.sex || !formData.dateOfBirth || 
         !formData.address || !formData.contact || !formData.visitPurpose) {
       toast.error('Please fill in all required fields');
@@ -193,23 +187,20 @@ const Guest = () => {
     try {
       const submitData = new FormData();
       
-      // Format data properly
       const formattedData = {
         ...formData,
         middleName: formData.middleName || '',
         extension: formData.extension || '',
         age: formData.age || '',
-        status: formData.status || 'pending'
+        status: 'approved'
       };
 
-      // Append all form data
       Object.keys(formattedData).forEach(key => {
         if (formattedData[key] !== null && formattedData[key] !== undefined) {
           submitData.append(key, formattedData[key]);
         }
       });
 
-      // Append image file
       if (imageFile) {
         submitData.append('photo', imageFile);
       }
@@ -236,12 +227,9 @@ const Guest = () => {
       fetchGuests();
     } catch (error) {
       console.error('Error submitting guest:', error);
-      console.error('Error response:', error.response?.data);
-      
       const errorMessage = error.response?.data?.message || 
                         error.response?.data?.error || 
                         `Failed to ${editingGuest ? 'update' : 'create'} guest`;
-      
       toast.error(errorMessage);
     } finally {
       setIsLoading(false);
@@ -252,8 +240,7 @@ const Guest = () => {
     const headers = [
       'Guest ID', 'Last Name', 'First Name', 'Middle Name', 'Extension',
       'Date of Birth', 'Age', 'Gender', 'Address', 'Contact',
-      'Visit Purpose', 'Status', 'Date Visited', 'Time In', 'Time Out',
-      'Approved By', 'Rejected By'
+      'Visit Purpose', 'Status', 'Violation Type', 'Violation Details', 'Date Visited', 'Time In', 'Time Out'
     ];
 
     const csvData = guests.map(guest => [
@@ -268,12 +255,12 @@ const Guest = () => {
       guest.address,
       guest.contact,
       guest.visitPurpose,
-      guest.status,
+      guest.status || 'approved',
+      guest.violationType || 'No violation',
+      guest.violationDetails || 'No violation data',
       guest.dateVisited ? new Date(guest.dateVisited).toLocaleDateString() : 'Not visited',
       guest.timeIn || 'Not recorded',
-      guest.timeOut || 'Not recorded',
-      guest.approvedBy || 'N/A',
-      guest.rejectedBy || 'N/A'
+      guest.timeOut || 'Not recorded'
     ]);
 
     const csvContent = [headers, ...csvData]
@@ -315,19 +302,9 @@ const Guest = () => {
       address: '',
       contact: '',
       visitPurpose: '',
-      status: 'pending'
+      status: 'approved'
     });
     setImageFile(null);
-  };
-
-  const getStatusVariant = (status) => {
-    switch (status) {
-      case 'approved': return 'success';
-      case 'pending': return 'warning';
-      case 'rejected': return 'danger';
-      case 'completed': return 'info';
-      default: return 'secondary';
-    }
   };
 
   const calculateAge = (dateOfBirth) => {
@@ -349,6 +326,30 @@ const Guest = () => {
     return { variant: 'secondary', text: 'Unknown' };
   };
 
+  const getViolationVariant = (guest) => {
+    if (guest.violationType && guest.violationType.trim() !== '') {
+      return 'danger';
+    }
+    return 'success';
+  };
+
+  const getViolationText = (guest) => {
+    if (guest.violationType && guest.violationType.trim() !== '') {
+      return guest.violationType;
+    }
+    return 'No violation';
+  };
+
+  const getStatusVariant = (guest) => {
+    switch (guest.status) {
+      case 'approved': return 'success';
+      case 'completed': return 'info';
+      case 'pending': return 'warning';
+      case 'rejected': return 'danger';
+      default: return 'secondary';
+    }
+  };
+
   const formatDate = (dateString) => {
     if (!dateString) return 'No visits';
     try {
@@ -367,11 +368,7 @@ const Guest = () => {
     }
   };
 
-  const formatTime = (timeString) => {
-    if (!timeString) return 'Not recorded';
-    return timeString;
-  };
-
+  // Custom print functionality like in Visitor.js
   const printGuestDetails = () => {
     const printWindow = window.open('', '_blank');
     const timeStatus = getTimeStatus(selectedGuest);
@@ -422,6 +419,12 @@ const Guest = () => {
             .full-width {
               grid-column: 1 / -1;
             }
+            .violation { 
+              background-color: #ffe6e6; 
+              border-left: 4px solid #dc3545;
+              padding: 10px;
+              margin: 10px 0;
+            }
             .qr-code {
               text-align: center;
               margin: 20px 0;
@@ -468,6 +471,14 @@ const Guest = () => {
             .status-success { background-color: #28a745; }
             .status-info { background-color: #17a2b8; }
             .status-secondary { background-color: #6c757d; }
+            .status-badge {
+              display: inline-block;
+              padding: 4px 8px;
+              border-radius: 4px;
+              color: white;
+              font-weight: bold;
+              margin-left: 5px;
+            }
             @media print {
               body { margin: 10px; }
               .section { border: none; }
@@ -475,6 +486,7 @@ const Guest = () => {
                 display: flex; 
                 justify-content: space-around;
               }
+              .header { border-bottom: 2px solid #333; }
             }
           </style>
         </head>
@@ -482,7 +494,7 @@ const Guest = () => {
           <div class="header">
             <h1>PRISON MANAGEMENT SYSTEM</h1>
             <h2>GUEST DETAILS RECORD</h2>
-            <h3>ID: ${selectedGuest?.id}</h3>
+            <h3>Guest ID: ${selectedGuest?.id}</h3>
           </div>
           
           ${selectedGuest ? `
@@ -501,6 +513,15 @@ const Guest = () => {
                 <div class="info-item">
                   <span class="label">Time Status:</span> 
                   <span class="time-status status-${timeStatus.variant}">${timeStatus.text}</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">Guest Status:</span> 
+                  <span class="status-badge" style="background-color: ${
+                    selectedGuest.status === 'approved' ? '#28a745' :
+                    selectedGuest.status === 'completed' ? '#17a2b8' :
+                    selectedGuest.status === 'pending' ? '#ffc107' :
+                    selectedGuest.status === 'rejected' ? '#dc3545' : '#6c757d'
+                  }">${selectedGuest.status?.toUpperCase() || 'APPROVED'}</span>
                 </div>
               </div>
             </div>
@@ -548,9 +569,6 @@ const Guest = () => {
                 <div class="info-item">
                   <span class="label">Contact:</span> ${selectedGuest.contact || 'N/A'}
                 </div>
-                <div class="info-item">
-                  <span class="label">Status:</span> ${selectedGuest.status.toUpperCase()}
-                </div>
               </div>
             </div>
 
@@ -560,12 +578,37 @@ const Guest = () => {
                 <div class="info-item full-width">
                   <span class="label">Visit Purpose:</span> ${selectedGuest.visitPurpose}
                 </div>
+                ${selectedGuest.approvedBy ? `
+                <div class="info-item">
+                  <span class="label">Approved By:</span> ${selectedGuest.approvedBy}
+                </div>
+                ` : ''}
+                ${selectedGuest.rejectedBy ? `
+                <div class="info-item">
+                  <span class="label">Rejected By:</span> ${selectedGuest.rejectedBy}
+                </div>
+                ` : ''}
               </div>
             </div>
 
+            ${selectedGuest.violationType ? `
+            <div class="section">
+              <h3>Violation Information</h3>
+              <div class="violation">
+                <div class="info-item">
+                  <span class="label">Violation Type:</span> ${selectedGuest.violationType}
+                </div>
+                <div class="info-item full-width">
+                  <span class="label">Violation Details:</span> ${selectedGuest.violationDetails || 'No violation data'}
+                </div>
+              </div>
+            </div>
+            ` : ''}
+
             <div class="section">
               <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
-                <p>Generated on: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
+                <p><strong>Generated on:</strong> ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
+                <p><em>Official Document - Prison Management System</em></p>
               </div>
             </div>
           ` : ''}
@@ -592,7 +635,7 @@ const Guest = () => {
             👤 Guests Management
           </h2>
           <Badge bg="info" className="mb-2">
-            Admin Access
+            All Guests - No Status Filtering
           </Badge>
         </div>
         <div className="d-flex gap-2">
@@ -607,7 +650,6 @@ const Guest = () => {
         </div>
       </div>
 
-      {/* Search Section */}
       <Card className="mb-4 border-0 bg-light">
         <Card.Body>
           <Row className="align-items-center">
@@ -639,7 +681,7 @@ const Guest = () => {
             </Col>
             <Col md={4}>
               <div className="text-muted small">
-                {filteredGuests.length} guests found
+                {filteredGuests.length} guests found (showing all statuses)
               </div>
             </Col>
           </Row>
@@ -664,9 +706,10 @@ const Guest = () => {
               <th>Full Name</th>
               <th>Gender</th>
               <th>Visit Purpose</th>
+              {/* STATUS COLUMN REMOVED */}
               <th>Last Visit Date</th>
               <th>Time Status</th>
-              <th>Status</th>
+              <th>Violation Type</th>
               <th style={{ width: '120px' }}>Actions</th>
             </tr>
           </thead>
@@ -677,6 +720,7 @@ const Guest = () => {
                 <td>{guest.fullName}</td>
                 <td>{guest.sex}</td>
                 <td>{guest.visitPurpose}</td>
+                {/* STATUS CELL REMOVED */}
                 <td>
                   {guest.dateVisited ? (
                     <Badge bg="info">
@@ -692,8 +736,8 @@ const Guest = () => {
                   </Badge>
                 </td>
                 <td>
-                  <Badge bg={getStatusVariant(guest.status)}>
-                    {guest.status}
+                  <Badge bg={getViolationVariant(guest)}>
+                    {getViolationText(guest)}
                   </Badge>
                 </td>
                 <td>
@@ -889,19 +933,6 @@ const Guest = () => {
             </Form.Group>
 
             <Form.Group className="mb-3">
-              <Form.Label>Status</Form.Label>
-              <Form.Select
-                name="status"
-                value={formData.status}
-                onChange={handleInputChange}
-              >
-                <option value="pending">Pending</option>
-                <option value="approved">Approved</option>
-                <option value="rejected">Rejected</option>
-              </Form.Select>
-            </Form.Group>
-
-            <Form.Group className="mb-3">
               <Form.Label>Guest Photo</Form.Label>
               <Form.Control
                 type="file"
@@ -951,6 +982,7 @@ const Guest = () => {
                       <Col md={6}>
                         <p><strong>Time Out:</strong> {selectedGuest.timeOut || 'Not recorded'}</p>
                         <p><strong>Time Status:</strong> <Badge bg={getTimeStatus(selectedGuest).variant}>{getTimeStatus(selectedGuest).text}</Badge></p>
+                        <p><strong>Guest Status:</strong> <Badge bg={getStatusVariant(selectedGuest)}>{selectedGuest.status?.toUpperCase() || 'APPROVED'}</Badge></p>
                       </Col>
                     </Row>
                   </Card.Body>
@@ -992,13 +1024,20 @@ const Guest = () => {
                     {selectedGuest.photo && (
                       <div className="text-center mb-3">
                         <img 
-                          src={`http://localhost:5000/uploads/${selectedGuest.photo}`}
+                          src={
+                            selectedGuest.photo.startsWith('http') 
+                              ? selectedGuest.photo 
+                              : `http://localhost:5000/uploads/${selectedGuest.photo}`
+                          }
                           alt="Guest"
                           style={{ 
                             maxWidth: '200px', 
                             maxHeight: '200px', 
                             objectFit: 'cover',
                             borderRadius: '5px'
+                          }}
+                          onError={(e) => {
+                            e.target.style.display = 'none';
                           }}
                         />
                       </div>
@@ -1009,7 +1048,6 @@ const Guest = () => {
                     <p><strong>Age:</strong> {calculateAge(selectedGuest.dateOfBirth)}</p>
                     <p><strong>Address:</strong> {selectedGuest.address}</p>
                     <p><strong>Contact:</strong> {selectedGuest.contact || 'N/A'}</p>
-                    <p><strong>Status:</strong> <Badge bg={getStatusVariant(selectedGuest.status)}>{selectedGuest.status}</Badge></p>
                   </Card.Body>
                 </Card>
               </Col>
@@ -1020,6 +1058,7 @@ const Guest = () => {
                   </Card.Header>
                   <Card.Body>
                     <p><strong>Visit Purpose:</strong> {selectedGuest.visitPurpose}</p>
+                    <p><strong>Status:</strong> <Badge bg={getStatusVariant(selectedGuest)}>{selectedGuest.status?.toUpperCase() || 'APPROVED'}</Badge></p>
                     {selectedGuest.approvedBy && (
                       <p><strong>Approved By:</strong> {selectedGuest.approvedBy}</p>
                     )}
@@ -1028,6 +1067,18 @@ const Guest = () => {
                     )}
                   </Card.Body>
                 </Card>
+
+                {selectedGuest.violationType && (
+                  <Card className="mb-3 border-danger">
+                    <Card.Header className="bg-danger text-white">
+                      <strong>Violation Information</strong>
+                    </Card.Header>
+                    <Card.Body>
+                      <p><strong>Violation Type:</strong> {selectedGuest.violationType}</p>
+                      <p><strong>Violation Details:</strong> {selectedGuest.violationDetails || 'No violation data'}</p>
+                    </Card.Body>
+                  </Card>
+                )}
               </Col>
             </Row>
           )}
@@ -1060,6 +1111,9 @@ const Guest = () => {
                   />
                   <p className="mt-3"><strong>{selectedQRGuest.fullName}</strong></p>
                   <p className="text-muted">Guest ID: {selectedQRGuest.id}</p>
+                  <Badge bg={getStatusVariant(selectedQRGuest)}>
+                    Status: {selectedQRGuest.status?.toUpperCase() || 'APPROVED'}
+                  </Badge>
                 </>
               ) : (
                 <Alert variant="warning">

@@ -7,7 +7,7 @@ import QrScanner from 'qr-scanner';
 const ScanQR = ({ show, onHide, onVisitUpdate }) => {
   const [scanner, setScanner] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
-  const [scannedVisitor, setScannedVisitor] = useState(null);
+  const [scannedPerson, setScannedPerson] = useState(null);
   const [showVisitorModal, setShowVisitorModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [scanError, setScanError] = useState(null);
@@ -15,6 +15,8 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
   const [lastScannedCode, setLastScannedCode] = useState('');
   const scanTimeoutRef = useRef(null);
   const videoRef = useRef(null);
+
+  const API_BASE = 'http://localhost:5000';
 
   // Debounce scanning to prevent multiple rapid scans
   const debounce = (func, wait) => {
@@ -35,7 +37,7 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       setScanError(null);
     } else {
       stopScanner();
-      setScannedVisitor(null);
+      setScannedPerson(null);
       setShowVisitorModal(false);
       setScanError(null);
       if (scanTimeoutRef.current) {
@@ -106,7 +108,8 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
   const debouncedHandleScan = debounce(async (qrData) => {
     if (isLoading || qrData === lastScannedCode) return;
     
-    let visitorId;
+    let personId;
+    let isGuest = false;
     
     try {
       setIsLoading(true);
@@ -115,72 +118,128 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
 
       console.log('📱 QR Code Scanned:', qrData);
 
+      // Parse QR data to determine if it's a visitor or guest
       try {
         const parsedData = JSON.parse(qrData);
-        visitorId = parsedData.id || parsedData.visitorId;
+        personId = parsedData.id || parsedData.visitorId;
+        
+        // IMPROVED LOGIC: Check both type field and ID prefix
+        if (parsedData.type === 'guest') {
+          isGuest = true;
+        } else if (parsedData.type === 'visitor') {
+          isGuest = false;
+        } else if (parsedData.prisonerId) {
+          // Has prisonerId = visitor
+          isGuest = false;
+        } else if (personId && personId.startsWith('GST')) {
+          // ID starts with GST = guest
+          isGuest = true;
+        } else if (personId && personId.startsWith('VIS')) {
+          // ID starts with VIS = visitor  
+          isGuest = false;
+        } else {
+          // Fallback: check if it has visitPurpose (guest) or prisonerId (visitor)
+          isGuest = !!parsedData.visitPurpose && !parsedData.prisonerId;
+        }
       } catch (e) {
-        // If not JSON, try to extract ID from string
-        visitorId = qrData;
+        // If not JSON, try to extract ID from string and determine by prefix
+        personId = qrData;
+        if (personId.startsWith('GST')) {
+          isGuest = true;
+        } else if (personId.startsWith('VIS')) {
+          isGuest = false;
+        }
+        // If we can't determine, we'll try both endpoints
       }
 
-      if (!visitorId) {
-        setScanError('Invalid QR code format. Please ensure you are scanning a valid visitor QR code.');
+      if (!personId) {
+        setScanError('Invalid QR code format. Please ensure you are scanning a valid QR code.');
         setIsLoading(false);
         return;
       }
 
-      console.log('🔍 Looking up visitor ID:', visitorId);
+      console.log('🔍 Looking up person ID:', personId, 'isGuest:', isGuest);
 
-      // Get current visitor data first
-      const response = await axios.get(`http://localhost:5000/visitors/${visitorId}`);
-      const visitor = response.data;
+      // Get person data based on type - with fallback
+      let person;
+      try {
+        if (isGuest) {
+          const response = await axios.get(`${API_BASE}/guests/${personId}`);
+          person = response.data;
+        } else {
+          const response = await axios.get(`${API_BASE}/visitors/${personId}`);
+          person = response.data;
+        }
+      } catch (firstError) {
+        // If first attempt failed, try the opposite type
+        console.log('⚠️ First lookup failed, trying opposite type...');
+        try {
+          if (isGuest) {
+            // Tried guest first, now try visitor
+            const response = await axios.get(`${API_BASE}/visitors/${personId}`);
+            person = response.data;
+            isGuest = false; // Update type since we found it as visitor
+          } else {
+            // Tried visitor first, now try guest
+            const response = await axios.get(`${API_BASE}/guests/${personId}`);
+            person = response.data;
+            isGuest = true; // Update type since we found it as guest
+          }
+        } catch (secondError) {
+          // Both attempts failed
+          setScanError('Person not found in database. Please check the QR code.');
+          setIsLoading(false);
+          return;
+        }
+      }
 
-      if (!visitor) {
-        setScanError('Visitor not found in database. Please check the QR code.');
+      if (!person) {
+        setScanError(`${isGuest ? 'Guest' : 'Visitor'} not found in database. Please check the QR code.`);
         setIsLoading(false);
         return;
       }
 
       const currentDate = new Date().toISOString().split('T')[0];
-      const visitorLastVisitDate = visitor.lastVisitDate ? 
-        new Date(visitor.lastVisitDate).toISOString().split('T')[0] : null;
+      const personLastVisitDate = person.lastVisitDate ? 
+        new Date(person.lastVisitDate).toISOString().split('T')[0] : null;
 
       let scanType = '';
       let message = '';
 
       console.log('🔍 Scan Analysis:', {
         currentDate,
-        visitorLastVisitDate,
-        hasTimedIn: visitor.hasTimedIn,
-        hasTimedOut: visitor.hasTimedOut,
-        timeIn: visitor.timeIn,
-        timeOut: visitor.timeOut
+        personLastVisitDate,
+        hasTimedIn: person.hasTimedIn,
+        hasTimedOut: person.hasTimedOut,
+        timeIn: person.timeIn,
+        timeOut: person.timeOut
       });
 
-      // DECISION LOGIC - UPDATED FOR DAILY RESET
-      if (!visitor.hasTimedIn || visitorLastVisitDate !== currentDate) {
-        // TIME IN - First scan of the day or new day
+      // SCANNING LOGIC - UPDATED FOR VISIT LOGS
+      if (!person.hasTimedIn || personLastVisitDate !== currentDate) {
+        // NEW DAY or FIRST TIME IN - Reset for new visit
         scanType = 'time_in_pending';
-        message = '🕒 TIME IN REQUEST - Waiting for approval';
-      } else if (visitor.hasTimedIn && !visitor.hasTimedOut && visitorLastVisitDate === currentDate) {
-        // TIME OUT - Second scan of the same day
+        message = `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME IN REQUEST - New visit today`;
+      } else if (person.hasTimedIn && !person.hasTimedOut && personLastVisitDate === currentDate) {
+        // SAME DAY - Ready for time out
         scanType = 'time_out_pending';
-        message = '🕒 TIME OUT REQUEST - Waiting for approval';
-      } else if (visitor.hasTimedIn && visitor.hasTimedOut && visitorLastVisitDate === currentDate) {
-        // ALREADY COMPLETED TODAY
+        message = `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME OUT REQUEST - Complete today's visit`;
+      } else if (person.hasTimedIn && person.hasTimedOut && personLastVisitDate === currentDate) {
+        // ALREADY COMPLETED TODAY'S VISIT
         scanType = 'completed';
-        message = '✅ You have already completed your visit today. Visit finished.';
+        message = `✅ You have already completed your visit today. Please come back tomorrow.`;
       } else {
-        // This handles cases where time records were reset
+        // FALLBACK - Start new visit
         scanType = 'time_in_pending';
-        message = '🕒 TIME IN REQUEST - Ready for new visit';
+        message = `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME IN REQUEST - Ready for new visit`;
       }
 
-      // ALWAYS set scanned visitor and show modal
-      setScannedVisitor({
-        ...visitor,
+      // ALWAYS set scanned person and show modal
+      setScannedPerson({
+        ...person,
         scanType: scanType,
-        scanMessage: message
+        scanMessage: message,
+        isGuest: isGuest
       });
       
       // STOP SCANNER and CLOSE SCANNER MODAL
@@ -195,7 +254,7 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     } catch (error) {
       console.error('❌ Error processing QR scan:', error);
       if (error.response?.status === 404) {
-        setScanError('Visitor not found. Please check if the QR code is valid.');
+        setScanError('Person not found. Please check if the QR code is valid.');
       } else {
         setScanError('Failed to process QR code. Please try again.');
       }
@@ -208,115 +267,92 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     debouncedHandleScan(qrData);
   };
 
-  const handleApproveVisit = async () => {
-    if (!scannedVisitor) return;
+ const handleApproveVisit = async () => {
+  if (!scannedPerson) return;
 
-    try {
-      setIsApproving(true);
-      
-      // Convert to 12-hour format
-      const currentTime = new Date().toLocaleTimeString('en-US', { 
-        hour12: true,
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-      
-      const currentDate = new Date().toISOString().split('T')[0];
-      
-      let updateData = {};
-      let timerEndpoint = '';
-      
-      if (scannedVisitor.scanType === 'time_in_pending') {
-        // Start timer for time in - FIXED: Properly set timer fields
-        updateData = { 
-          hasTimedIn: true,
-          timeIn: currentTime,
-          lastVisitDate: currentDate,
-          dateVisited: currentDate,
-          status: 'approved',
-          // CRITICAL: Set timer fields to activate the timer
-          isTimerActive: true,
-          timerStart: new Date(),
-          timerEnd: new Date(Date.now() + (3 * 60 * 60 * 1000)), // 3 hours from now
-          visitApproved: true
-        };
-        timerEndpoint = `http://localhost:5000/visitors/${scannedVisitor.id}/start-timer`;
-      } else if (scannedVisitor.scanType === 'time_out_pending') {
-        // Stop timer for time out
-        updateData = { 
-          hasTimedOut: true,
-          timeOut: currentTime,
-          isTimerActive: false // Stop the timer
-        };
-        timerEndpoint = `http://localhost:5000/visitors/${scannedVisitor.id}/stop-timer`;
+  try {
+    setIsApproving(true);
+    
+    let endpoint = '';
+    let successMessage = '';
+
+    // USE THE SPECIALIZED ENDPOINTS THAT CREATE VISIT LOGS
+    if (scannedPerson.scanType === 'time_in_pending') {
+      if (scannedPerson.isGuest) {
+        endpoint = `${API_BASE}/guests/${scannedPerson.id}/approve-time-in`;
+        successMessage = '✅ GUEST TIME IN APPROVED - Visit started';
+      } else {
+        endpoint = `${API_BASE}/visitors/${scannedPerson.id}/approve-time-in`;
+        successMessage = '✅ VISITOR TIME IN APPROVED - Timer started (3 hours)';
       }
-
-      console.log('🔄 Updating visitor data:', updateData);
-      
-      // Update visitor record - FIXED: Use PUT to update all fields including timer
-      const updateResponse = await axios.put(`http://localhost:5000/visitors/${scannedVisitor.id}`, updateData);
-      console.log('✅ Visitor updated:', updateResponse.data);
-
-      // ALSO call the timer endpoint to ensure timer is started
-      if (timerEndpoint && scannedVisitor.scanType === 'time_in_pending') {
-        console.log('⏰ Calling timer endpoint:', timerEndpoint);
-        try {
-          const timerResponse = await axios.put(timerEndpoint);
-          console.log('✅ Timer response:', timerResponse.data);
-        } catch (timerError) {
-          console.error('⚠️ Timer endpoint error (but visitor updated):', timerError);
-          // Continue even if timer endpoint fails, since we already set timer fields
-        }
+    } else if (scannedPerson.scanType === 'time_out_pending') {
+      if (scannedPerson.isGuest) {
+        endpoint = `${API_BASE}/guests/${scannedPerson.id}/approve-time-out`;
+        successMessage = '✅ GUEST TIME OUT APPROVED - Visit completed';
+      } else {
+        endpoint = `${API_BASE}/visitors/${scannedPerson.id}/approve-time-out`;
+        successMessage = '✅ VISITOR TIME OUT APPROVED - Visit completed';
       }
-
-      // Update scanned visitor with success message
-      const updatedVisitor = {
-        ...updateResponse.data,
-        scanType: scannedVisitor.scanType === 'time_in_pending' ? 'time_in_approved' : 'time_out_approved',
-        scanMessage: scannedVisitor.scanType === 'time_in_pending' 
-          ? '✅ TIME IN APPROVED - Timer started (3 hours)' 
-          : '✅ TIME OUT APPROVED - Visit completed'
-      };
-      
-      setScannedVisitor(updatedVisitor);
-
-      // Notify parent component about the update
-      if (onVisitUpdate) {
-        onVisitUpdate();
-      }
-
-    } catch (error) {
-      console.error('❌ Error approving visit:', error);
-      setScannedVisitor({
-        ...scannedVisitor,
-        scanType: 'error',
-        scanMessage: 'Failed to approve visit. Please try again. Error: ' + (error.response?.data?.message || error.message)
-      });
-    } finally {
-      setIsApproving(false);
     }
-  };
+
+    console.log('🔄 Calling approval endpoint:', endpoint);
+    
+    const response = await axios.put(endpoint);
+    console.log('✅ Approval response:', response.data);
+
+    // Update scanned person with success message
+    const successType = scannedPerson.scanType === 'time_in_pending' ? 'time_in_approved' : 'time_out_approved';
+    
+    const updatedPerson = {
+      ...(response.data.visitor || response.data.guest),
+      scanType: successType,
+      scanMessage: successMessage,
+      isGuest: scannedPerson.isGuest
+    };
+    
+    setScannedPerson(updatedPerson);
+
+    // Notify parent component about the update
+    if (onVisitUpdate) {
+      onVisitUpdate();
+    }
+
+  } catch (error) {
+    console.error('❌ Error approving visit:', error);
+    setScannedPerson({
+      ...scannedPerson,
+      scanType: 'error',
+      scanMessage: 'Failed to approve visit. Please try again. Error: ' + (error.response?.data?.message || error.message)
+    });
+  } finally {
+    setIsApproving(false);
+  }
+};
 
   const handleDeclineVisit = async () => {
-    if (!scannedVisitor) return;
+    if (!scannedPerson) return;
 
     try {
       setIsApproving(true);
       
-      await axios.put(`http://localhost:5000/visitors/${scannedVisitor.id}`, {
+      const endpoint = scannedPerson.isGuest 
+        ? `${API_BASE}/guests/${scannedPerson.id}`
+        : `${API_BASE}/visitors/${scannedPerson.id}`;
+      
+      await axios.put(endpoint, {
         status: 'rejected'
       });
       
-      setScannedVisitor({
-        ...scannedVisitor,
+      setScannedPerson({
+        ...scannedPerson,
         scanType: 'declined',
         scanMessage: '❌ Visit request declined'
       });
 
     } catch (error) {
       console.error('Error declining visit:', error);
-      setScannedVisitor({
-        ...scannedVisitor,
+      setScannedPerson({
+        ...scannedPerson,
         scanType: 'error',
         scanMessage: 'Failed to decline visit. Please try again.'
       });
@@ -327,7 +363,7 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
 
   const handleCloseVisitorModal = () => {
     setShowVisitorModal(false);
-    setScannedVisitor(null);
+    setScannedPerson(null);
     setLastScannedCode('');
   };
 
@@ -358,10 +394,10 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     }
   };
 
-  const getTimeStatus = (visitor) => {
-    if (!visitor.hasTimedIn) return { variant: 'secondary', text: 'Not Checked In' };
-    if (visitor.hasTimedIn && !visitor.hasTimedOut) return { variant: 'success', text: 'Checked In' };
-    if (visitor.hasTimedIn && visitor.hasTimedOut) return { variant: 'info', text: 'Checked Out' };
+  const getTimeStatus = (person) => {
+    if (!person.hasTimedIn) return { variant: 'secondary', text: 'Not Checked In' };
+    if (person.hasTimedIn && !person.hasTimedOut) return { variant: 'success', text: 'Checked In' };
+    if (person.hasTimedIn && person.hasTimedOut) return { variant: 'info', text: 'Checked Out' };
     return { variant: 'secondary', text: 'Unknown' };
   };
 
@@ -379,11 +415,11 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
   };
 
   const showApprovalButtons = () => {
-    return scannedVisitor && (scannedVisitor.scanType === 'time_in_pending' || scannedVisitor.scanType === 'time_out_pending');
+    return scannedPerson && (scannedPerson.scanType === 'time_in_pending' || scannedPerson.scanType === 'time_out_pending');
   };
 
   const showCompletedMessage = () => {
-    return scannedVisitor && (scannedVisitor.scanType === 'time_in_approved' || scannedVisitor.scanType === 'time_out_approved' || scannedVisitor.scanType === 'completed' || scannedVisitor.scanType === 'declined');
+    return scannedPerson && (scannedPerson.scanType === 'time_in_approved' || scannedPerson.scanType === 'time_out_approved' || scannedPerson.scanType === 'completed' || scannedPerson.scanType === 'declined');
   };
 
   // Format time display to 12-hour format
@@ -412,12 +448,12 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       {/* QR Scanner Modal */}
       <Modal show={show} onHide={handleCloseScanner} size="lg" centered backdrop="static">
         <Modal.Header closeButton>
-          <Modal.Title>Scan Visitor QR Code</Modal.Title>
+          <Modal.Title>Scan QR Code</Modal.Title>
         </Modal.Header>
         <Modal.Body className="text-center">
           <div className="mb-3">
             <p className="text-muted">
-              Position the visitor's QR code within the camera view. Hold steady for 1-2 seconds for accurate scanning.
+              Position the QR code within the camera view. Hold steady for 1-2 seconds for accurate scanning.
             </p>
           </div>
           
@@ -499,124 +535,158 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
         </Modal.Footer>
       </Modal>
 
-      {/* Visitor Details Modal with Approval */}
-      <Modal show={showVisitorModal} onHide={handleCloseVisitorModal} size="lg" centered>
-        <Modal.Header closeButton>
-          <Modal.Title>
-            Visitor Scan Details - {scannedVisitor?.id} 
-            <Badge bg={getScanAlertVariant(scannedVisitor?.scanType)} className="ms-2">
-              {scannedVisitor?.scanType?.replace(/_/g, ' ').toUpperCase() || 'SCAN'}
+      {/* Person Details Modal with Approval */}
+      <Modal show={showVisitorModal} onHide={handleCloseVisitorModal} size="xl" centered>
+        <Modal.Header closeButton className="bg-light">
+          <Modal.Title className="d-flex align-items-center">
+            <User size={24} className="me-2" />
+            {scannedPerson?.isGuest ? 'Guest' : 'Visitor'} Scan Details - {scannedPerson?.id} 
+            <Badge bg={getScanAlertVariant(scannedPerson?.scanType)} className="ms-2 fs-6">
+              {scannedPerson?.scanType?.replace(/_/g, ' ').toUpperCase() || 'SCAN'}
             </Badge>
           </Modal.Title>
         </Modal.Header>
-        <Modal.Body>
-          {scannedVisitor && (
+        <Modal.Body style={{ maxHeight: '80vh', overflowY: 'auto' }}>
+          {scannedPerson && (
             <>
-              <Alert variant={getScanAlertVariant(scannedVisitor.scanType)} className="mb-3">
-                <strong>
-                  {scannedVisitor.scanType === 'time_in_pending' ? '🕒 TIME IN REQUEST - AWAITING APPROVAL' : 
-                   scannedVisitor.scanType === 'time_out_pending' ? '🕒 TIME OUT REQUEST - AWAITING APPROVAL' : 
-                   scannedVisitor.scanType === 'time_in_approved' ? '✅ TIME IN APPROVED - TIMER STARTED' : 
-                   scannedVisitor.scanType === 'time_out_approved' ? '✅ TIME OUT APPROVED - VISIT COMPLETED' : 
-                   scannedVisitor.scanType === 'completed' ? '✅ VISIT COMPLETED TODAY' : 
-                   scannedVisitor.scanType === 'declined' ? '❌ VISIT DECLINED' : 
-                   '❌ SCAN ERROR'}
-                </strong>
-                <br />
-                {scannedVisitor.scanMessage}
-                {scannedVisitor.scanType === 'time_in_approved' && (
-                  <div className="mt-2">
-                    <strong>⏰ Timer: 3 hours started</strong>
+              <Alert variant={getScanAlertVariant(scannedPerson.scanType)} className="mb-4">
+                <div className="d-flex align-items-center">
+                  <div className="flex-grow-1">
+                    <h5 className="alert-heading mb-2">
+                      {scannedPerson.scanType === 'time_in_pending' ? '🕒 TIME IN REQUEST - AWAITING APPROVAL' : 
+                       scannedPerson.scanType === 'time_out_pending' ? '🕒 TIME OUT REQUEST - AWAITING APPROVAL' : 
+                       scannedPerson.scanType === 'time_in_approved' ? '✅ TIME IN APPROVED - TIMER STARTED' : 
+                       scannedPerson.scanType === 'time_out_approved' ? '✅ TIME OUT APPROVED - VISIT COMPLETED' : 
+                       scannedPerson.scanType === 'completed' ? '✅ VISIT COMPLETED TODAY' : 
+                       scannedPerson.scanType === 'declined' ? '❌ VISIT DECLINED' : 
+                       '❌ SCAN ERROR'}
+                    </h5>
+                    <p className="mb-0">{scannedPerson.scanMessage}</p>
+                    {scannedPerson.scanType === 'time_in_approved' && !scannedPerson.isGuest && (
+                      <div className="mt-2">
+                        <strong>⏰ Timer: 3 hours started</strong>
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
               </Alert>
               
               <Row>
-                <Col md={12}>
+                {/* Person Photo - Larger and Centered */}
+                <Col md={4}>
                   <Card className="mb-4">
-                    <Card.Header>
-                      <strong>Time Tracking Information</strong>
+                    <Card.Header className="text-center">
+                      <strong>{scannedPerson.isGuest ? 'Guest' : 'Visitor'} Identification</strong>
                     </Card.Header>
-                    <Card.Body>
-                      <Row>
-                        <Col md={6}>
-                          <p><strong>Last Visit Date:</strong> {scannedVisitor.lastVisitDate ? new Date(scannedVisitor.lastVisitDate).toLocaleDateString() : 'No previous visits'}</p>
-                          <p><strong>Time In:</strong> {scannedVisitor.timeIn ? <Badge bg="success">{formatTimeDisplay(scannedVisitor.timeIn)}</Badge> : 'Not recorded'}</p>
-                        </Col>
-                        <Col md={6}>
-                          <p><strong>Time Out:</strong> {scannedVisitor.timeOut ? <Badge bg="info">{formatTimeDisplay(scannedVisitor.timeOut)}</Badge> : 'Not recorded'}</p>
-                          <p><strong>Time Status:</strong> <Badge bg={getTimeStatus(scannedVisitor).variant}>{getTimeStatus(scannedVisitor).text}</Badge></p>
-                        </Col>
-                      </Row>
+                    <Card.Body className="text-center">
+                      {scannedPerson.photo ? (
+                        <Image 
+                          src={`http://localhost:5000/uploads/${scannedPerson.photo}`} 
+                          alt={scannedPerson.fullName}
+                          width={280}
+                          height={280}
+                          rounded
+                          style={{ 
+                            objectFit: 'cover',
+                            border: '3px solid #dee2e6'
+                          }}
+                          className="mb-3"
+                        />
+                      ) : (
+                        <div 
+                          className="d-flex align-items-center justify-content-center bg-light rounded mx-auto"
+                          style={{ width: 280, height: 280 }}
+                        >
+                          <User size={64} className="text-muted" />
+                        </div>
+                      )}
+                      <h5 className="mt-2">{scannedPerson.fullName}</h5>
+                      <Badge bg={getStatusVariant(scannedPerson.status)} className="fs-6">
+                        {scannedPerson.status.toUpperCase()}
+                      </Badge>
+                      <div className="mt-2">
+                        <Badge bg={scannedPerson.isGuest ? 'info' : 'primary'} className="fs-6">
+                          {scannedPerson.isGuest ? 'GUEST' : 'VISITOR'}
+                        </Badge>
+                      </div>
                     </Card.Body>
                   </Card>
                 </Col>
 
-                <Col md={6}>
-                  <Card className="mb-3">
-                    <Card.Header>
-                      <strong>Visitor Information</strong>
-                    </Card.Header>
-                    <Card.Body>
-                      <div className="d-flex align-items-center mb-3">
-                        <div className="me-3">
-                          {scannedVisitor.photo ? (
-                            <Image 
-                              src={`http://localhost:5000/uploads/${scannedVisitor.photo}`} 
-                              alt={scannedVisitor.fullName}
-                              width={80}
-                              height={80}
-                              rounded
-                              style={{ objectFit: 'cover' }}
-                            />
-                          ) : (
-                            <div 
-                              className="d-flex align-items-center justify-content-center bg-light rounded"
-                              style={{ width: 80, height: 80 }}
-                            >
-                              <User size={32} className="text-muted" />
-                            </div>
-                          )}
-                        </div>
-                        <div>
-                          <h6 className="mb-1">{scannedVisitor.fullName}</h6>
-                          <Badge bg={getStatusVariant(scannedVisitor.status)}>
-                            {scannedVisitor.status}
-                          </Badge>
-                        </div>
-                      </div>
+                <Col md={8}>
+                  <Row>
+                    <Col md={12}>
+                      <Card className="mb-4">
+                        <Card.Header>
+                          <strong>Time Tracking Information</strong>
+                        </Card.Header>
+                        <Card.Body>
+                          <Row>
+                            <Col md={6}>
+                              <p><strong>Last Visit Date:</strong> {scannedPerson.lastVisitDate ? new Date(scannedPerson.lastVisitDate).toLocaleDateString() : 'No previous visits'}</p>
+                              <p><strong>Time In:</strong> {scannedPerson.timeIn ? <Badge bg="success" className="fs-6">{formatTimeDisplay(scannedPerson.timeIn)}</Badge> : 'Not recorded'}</p>
+                            </Col>
+                            <Col md={6}>
+                              <p><strong>Time Out:</strong> {scannedPerson.timeOut ? <Badge bg="info" className="fs-6">{formatTimeDisplay(scannedPerson.timeOut)}</Badge> : 'Not recorded'}</p>
+                              <p><strong>Time Status:</strong> <Badge bg={getTimeStatus(scannedPerson).variant} className="fs-6">{getTimeStatus(scannedPerson).text}</Badge></p>
+                            </Col>
+                          </Row>
+                        </Card.Body>
+                      </Card>
+                    </Col>
+
+                    <Col md={6}>
+                      <Card className="mb-3">
+                        <Card.Header>
+                          <strong>Personal Information</strong>
+                        </Card.Header>
+                        <Card.Body>
+                          <p><strong>Gender:</strong> {scannedPerson.sex}</p>
+                          <p><strong>Date of Birth:</strong> {scannedPerson.dateOfBirth ? new Date(scannedPerson.dateOfBirth).toLocaleDateString() : 'N/A'}</p>
+                          <p><strong>Age:</strong> {calculateAge(scannedPerson.dateOfBirth)}</p>
+                          <p><strong>Address:</strong> {scannedPerson.address}</p>
+                          <p><strong>Contact:</strong> {scannedPerson.contact || 'N/A'}</p>
+                        </Card.Body>
+                      </Card>
+                    </Col>
+                    
+                    <Col md={6}>
+                      {scannedPerson.isGuest ? (
+                        <Card className="mb-3">
+                          <Card.Header>
+                            <strong>Guest Details</strong>
+                          </Card.Header>
+                          <Card.Body>
+                            <p><strong>Visit Purpose:</strong> {scannedPerson.visitPurpose}</p>
+                            <p><strong>Type:</strong> <Badge bg="info">GUEST</Badge></p>
+                          </Card.Body>
+                        </Card>
+                      ) : (
+                        <Card className="mb-3">
+                          <Card.Header>
+                            <strong>Visit Details</strong>
+                          </Card.Header>
+                          <Card.Body>
+                            <p><strong>Prisoner ID:</strong> {scannedPerson.prisonerId}</p>
+                            <p><strong>Relationship:</strong> {scannedPerson.relationship}</p>
+                            <p><strong>Type:</strong> <Badge bg="primary">VISITOR</Badge></p>
+                          </Card.Body>
+                        </Card>
+                      )}
                       
-                      <p><strong>Gender:</strong> {scannedVisitor.sex}</p>
-                      <p><strong>Date of Birth:</strong> {scannedVisitor.dateOfBirth ? new Date(scannedVisitor.dateOfBirth).toLocaleDateString() : 'N/A'}</p>
-                      <p><strong>Age:</strong> {calculateAge(scannedVisitor.dateOfBirth)}</p>
-                      <p><strong>Address:</strong> {scannedVisitor.address}</p>
-                      <p><strong>Contact:</strong> {scannedVisitor.contact || 'N/A'}</p>
-                    </Card.Body>
-                  </Card>
-                </Col>
-                
-                <Col md={6}>
-                  <Card className="mb-3">
-                    <Card.Header>
-                      <strong>Visit Details</strong>
-                    </Card.Header>
-                    <Card.Body>
-                      <p><strong>Prisoner ID:</strong> {scannedVisitor.prisonerId}</p>
-                      <p><strong>Relationship:</strong> {scannedVisitor.relationship}</p>
-                    </Card.Body>
-                  </Card>
-                  
-                  {scannedVisitor.violationType && (
-                    <Card className="mb-3 border-danger">
-                      <Card.Header className="bg-danger text-white">
-                        <strong>Violation Information</strong>
-                      </Card.Header>
-                      <Card.Body>
-                        <p><strong>Violation Type:</strong> {scannedVisitor.violationType}</p>
-                        <p><strong>Violation Details:</strong> {scannedVisitor.violationDetails || 'No violation data'}</p>
-                      </Card.Body>
-                    </Card>
-                  )}
+                      {scannedPerson.violationType && (
+                        <Card className="mb-3 border-danger">
+                          <Card.Header className="bg-danger text-white">
+                            <strong>Violation Information</strong>
+                          </Card.Header>
+                          <Card.Body>
+                            <p><strong>Violation Type:</strong> {scannedPerson.violationType}</p>
+                            <p><strong>Violation Details:</strong> {scannedPerson.violationDetails || 'No violation data'}</p>
+                          </Card.Body>
+                        </Card>
+                      )}
+                    </Col>
+                  </Row>
                 </Col>
               </Row>
             </>
@@ -629,22 +699,24 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
                 variant="danger" 
                 onClick={handleDeclineVisit}
                 disabled={isApproving}
+                size="lg"
               >
-                <XCircle size={16} className="me-1" />
-                {isApproving ? 'Declining...' : 'Decline'}
+                <XCircle size={20} className="me-2" />
+                {isApproving ? 'Declining...' : 'Decline Visit'}
               </Button>
               <Button 
                 variant="success" 
                 onClick={handleApproveVisit}
                 disabled={isApproving}
+                size="lg"
               >
-                <Check size={16} className="me-1" />
-                {isApproving ? 'Approving...' : 'Approve'}
+                <Check size={20} className="me-2" />
+                {isApproving ? 'Approving...' : 'Approve Visit'}
               </Button>
             </>
           )}
           {showCompletedMessage() && (
-            <Button variant="secondary" onClick={handleCloseVisitorModal}>
+            <Button variant="secondary" onClick={handleCloseVisitorModal} size="lg">
               Close
             </Button>
           )}

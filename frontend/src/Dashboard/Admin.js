@@ -43,13 +43,13 @@ const Admin = () => {
   }, []);
 
   const getAdminTitle = () => {
-    if (!user) return "Prison Management System";
+    if (!user) return "Visitor Management System";
     
     const role = user.role.toLowerCase();
-    if (role === 'fulladmin') return "Prison Management System - Full Access";
-    if (role === 'maleadmin') return "Prison Management System - Male Division";
-    if (role === 'femaleadmin') return "Prison Management System - Female Division";
-    return "Prison Management System";
+    if (role === 'fulladmin') return "Visitor Management System - Full Access";
+    if (role === 'maleadmin') return "Visitor Management System - Male Division";
+    if (role === 'femaleadmin') return "Visitor Management System - Female Division";
+    return "Visitor Management System";
   };
 
   const getAccessBadge = () => {
@@ -83,7 +83,7 @@ const Admin = () => {
   <NavLink to="/admin/dashboard" className="logo">
     <i className="bx bx-shield-quarter"></i>
     <div className="logo-name">
-      <span>Prison Management</span>
+      <span>Visitor Management</span>
       <div className="access-badge-container">
         {getAccessBadge()}
       </div>

@@ -40,7 +40,7 @@ const Staff = () => {
   }, []);
 
   const getStaffTitle = () => {
-    return "Prison Management System - Staff Access";
+    return "Visitor Management System - Staff Access";
   };
 
   const getAccessBadge = () => {
@@ -57,7 +57,7 @@ const Staff = () => {
         <NavLink to="/staff/dashboard" className="logo">
           <i className="bx bx-shield-quarter"></i>
           <div className="logo-name">
-            <span>Prison Management</span>
+            <span>Visitor Management</span>
             {getAccessBadge()}
           </div>
         </NavLink>

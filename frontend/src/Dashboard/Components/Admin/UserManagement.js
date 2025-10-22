@@ -177,7 +177,7 @@ const UserManagement = () => {
     <div className="user-management">
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h2 style={{ fontFamily: "Poppins, sans-serif", fontWeight: "600", color: "#2c3e50" }}>
-          👤 Prison User Management
+          👤User Management
         </h2>
         <Button variant="primary" onClick={() => setShowModal(true)}>
           + Add User

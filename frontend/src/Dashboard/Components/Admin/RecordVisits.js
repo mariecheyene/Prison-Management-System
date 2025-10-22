@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Container, Row, Col, Table, Button, Card, 
   Form, Badge, Spinner, Alert, InputGroup,
-  Modal, Tabs, Tab, ButtonGroup
+  Modal, Tabs, Tab
 } from 'react-bootstrap';
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -13,14 +13,11 @@ import {
   Calendar,
   Download,
   User,
-  Clock,
-  MapPin,
   Trash2,
   AlertTriangle,
   Slash,
   Edit,
   CheckCircle,
-  XCircle,
   Eye,
   Users,
   RefreshCw
@@ -52,8 +49,7 @@ const RecordVisits = () => {
   // Form states
   const [violationForm, setViolationForm] = useState({
     violationType: '',
-    violationDetails: '',
-    severity: 'medium'
+    violationDetails: ''
   });
   const [banForm, setBanForm] = useState({
     reason: '',
@@ -102,12 +98,35 @@ const RecordVisits = () => {
     filterLogs();
   }, [visitLogs, startDate, endDate, searchQuery, searchBy, activeTab]);
 
+  // FIXED: Fetch visit logs with guest visit purpose
   const fetchVisitLogs = async () => {
     setIsLoading(true);
     try {
       const response = await axios.get(`${API_BASE}/visit-logs`);
+      console.log('Raw visit logs:', response.data);
       
-      const sortedLogs = response.data.sort((a, b) => {
+      // Fetch guest details to get visit purpose for guest logs
+      const logsWithGuestDetails = await Promise.all(
+        response.data.map(async (log) => {
+          if (log.personType === 'guest') {
+            try {
+              console.log('Fetching guest details for:', log.personId);
+              const guestResponse = await axios.get(`${API_BASE}/guests/${log.personId}`);
+              console.log('Guest details:', guestResponse.data);
+              return {
+                ...log,
+                visitPurpose: guestResponse.data.visitPurpose || 'General Visit'
+              };
+            } catch (error) {
+              console.error(`Error fetching guest ${log.personId}:`, error);
+              return { ...log, visitPurpose: 'General Visit' };
+            }
+          }
+          return log;
+        })
+      );
+      
+      const sortedLogs = logsWithGuestDetails.sort((a, b) => {
         const dateA = new Date(a.visitDate);
         const dateB = new Date(b.visitDate);
         if (dateA.getTime() === dateB.getTime()) {
@@ -116,6 +135,7 @@ const RecordVisits = () => {
         return dateB - dateA;
       });
       
+      console.log('Final visit logs with guest purposes:', sortedLogs);
       setVisitLogs(sortedLogs);
     } catch (error) {
       console.error("Error fetching visit logs:", error);
@@ -134,31 +154,31 @@ const RecordVisits = () => {
     }
   };
 
+  // FIXED: Fetch violators with guest visit purpose
   const fetchViolators = async () => {
     try {
-      // Fetch visitors and guests with violations
       const [visitorsRes, guestsRes] = await Promise.all([
         axios.get(`${API_BASE}/visitors`),
         axios.get(`${API_BASE}/guests`)
       ]);
       
       const visitorsWithViolations = visitorsRes.data
-        .filter(visitor => visitor.violationType || visitor.violations)
+        .filter(visitor => visitor.violationType)
         .map(visitor => ({
           ...visitor,
           personType: 'visitor',
           personName: visitor.fullName,
-          id: visitor._id || visitor.id
+          id: visitor.id
         }));
       
       const guestsWithViolations = guestsRes.data
-        .filter(guest => guest.violationType || guest.violations)
+        .filter(guest => guest.violationType)
         .map(guest => ({
           ...guest,
           personType: 'guest',
           personName: guest.fullName,
-          id: guest._id || guest.id,
-          visitPurpose: guest.visitPurpose // Include visit purpose
+          id: guest.id,
+          visitPurpose: guest.visitPurpose
         }));
       
       const allViolators = [...visitorsWithViolations, ...guestsWithViolations];
@@ -169,9 +189,9 @@ const RecordVisits = () => {
     }
   };
 
+  // FIXED: Fetch banned with guest visit purpose
   const fetchBanned = async () => {
     try {
-      // Fetch visitors and guests who are banned
       const [visitorsRes, guestsRes] = await Promise.all([
         axios.get(`${API_BASE}/visitors`),
         axios.get(`${API_BASE}/guests`)
@@ -183,7 +203,7 @@ const RecordVisits = () => {
           ...visitor,
           personType: 'visitor',
           personName: visitor.fullName,
-          id: visitor._id || visitor.id
+          id: visitor.id
         }));
       
       const bannedGuests = guestsRes.data
@@ -192,8 +212,8 @@ const RecordVisits = () => {
           ...guest,
           personType: 'guest',
           personName: guest.fullName,
-          id: guest._id || guest.id,
-          visitPurpose: guest.visitPurpose // Include visit purpose
+          id: guest.id,
+          visitPurpose: guest.visitPurpose
         }));
       
       const allBanned = [...bannedVisitors, ...bannedGuests];
@@ -271,8 +291,7 @@ const RecordVisits = () => {
     setSelectedPerson(null);
     setViolationForm({
       violationType: '',
-      violationDetails: '',
-      severity: 'medium'
+      violationDetails: ''
     });
     setShowViolationModal(true);
   };
@@ -293,8 +312,7 @@ const RecordVisits = () => {
     setSelectedLog(null);
     setViolationForm({
       violationType: person.violationType || '',
-      violationDetails: person.violationDetails || '',
-      severity: 'medium'
+      violationDetails: person.violationDetails || ''
     });
     setShowViolationModal(true);
   };
@@ -342,6 +360,7 @@ const RecordVisits = () => {
     }
   };
 
+  // FIXED: Working violation handler with proper error handling
   const handleAddViolation = async () => {
     if (!violationForm.violationType) {
       toast.error("Please select a violation type");
@@ -349,8 +368,6 @@ const RecordVisits = () => {
     }
 
     try {
-      console.log('Adding violation for:', selectedLog);
-      
       const endpoint = selectedLog.personType === 'visitor' 
         ? `${API_BASE}/visitors/${selectedLog.personId}/violation`
         : `${API_BASE}/guests/${selectedLog.personId}/violation`;
@@ -360,11 +377,11 @@ const RecordVisits = () => {
         violationDetails: violationForm.violationDetails
       };
       
-      console.log('Sending violation data:', violationData);
-      console.log('Endpoint:', endpoint);
+      console.log('🔄 Adding violation to:', endpoint);
+      console.log('📦 Violation data:', violationData);
       
       const response = await axios.put(endpoint, violationData);
-      console.log('Violation response:', response.data);
+      console.log('✅ Violation response:', response.data);
       
       toast.success("Violation added successfully");
       setShowViolationModal(false);
@@ -372,8 +389,8 @@ const RecordVisits = () => {
       fetchViolators();
       fetchVisitLogs();
     } catch (error) {
-      console.error("Error adding violation:", error);
-      console.error("Error details:", error.response?.data || error.message);
+      console.error("❌ Error adding violation:", error);
+      console.error("📋 Error details:", error.response?.data);
       toast.error(`Failed to add violation: ${error.response?.data?.message || error.message}`);
     }
   };
@@ -385,8 +402,6 @@ const RecordVisits = () => {
     }
 
     try {
-      console.log('Editing violation for:', selectedPerson);
-      
       const endpoint = selectedPerson.personType === 'visitor' 
         ? `${API_BASE}/visitors/${selectedPerson.id}/violation`
         : `${API_BASE}/guests/${selectedPerson.id}/violation`;
@@ -396,20 +411,14 @@ const RecordVisits = () => {
         violationDetails: violationForm.violationDetails
       };
       
-      console.log('Sending violation data:', violationData);
-      console.log('Endpoint:', endpoint);
-      
-      const response = await axios.put(endpoint, violationData);
-      console.log('Violation response:', response.data);
-      
+      await axios.put(endpoint, violationData);
       toast.success("Violation updated successfully");
       setShowViolationModal(false);
       setSelectedPerson(null);
       fetchViolators();
     } catch (error) {
       console.error("Error updating violation:", error);
-      console.error("Error details:", error.response?.data || error.message);
-      toast.error(`Failed to update violation: ${error.response?.data?.message || error.message}`);
+      toast.error("Failed to update violation");
     }
   };
 
@@ -432,6 +441,7 @@ const RecordVisits = () => {
     }
   };
 
+  // FIXED: Working ban handler with proper error handling
   const handleAddBan = async () => {
     if (!banForm.reason) {
       toast.error("Please provide a ban reason");
@@ -439,8 +449,6 @@ const RecordVisits = () => {
     }
 
     try {
-      console.log('Adding ban for:', selectedLog);
-      
       const endpoint = selectedLog.personType === 'visitor' 
         ? `${API_BASE}/visitors/${selectedLog.personId}/ban`
         : `${API_BASE}/guests/${selectedLog.personId}/ban`;
@@ -451,11 +459,11 @@ const RecordVisits = () => {
         notes: banForm.notes
       };
       
-      console.log('Sending ban data:', banData);
-      console.log('Endpoint:', endpoint);
+      console.log('🔄 Adding ban to:', endpoint);
+      console.log('📦 Ban data:', banData);
       
       const response = await axios.put(endpoint, banData);
-      console.log('Ban response:', response.data);
+      console.log('✅ Ban response:', response.data);
       
       toast.success("Person banned successfully");
       setShowBanModal(false);
@@ -463,8 +471,8 @@ const RecordVisits = () => {
       fetchBanned();
       fetchVisitLogs();
     } catch (error) {
-      console.error("Error adding ban:", error);
-      console.error("Error details:", error.response?.data || error.message);
+      console.error("❌ Error adding ban:", error);
+      console.error("📋 Error details:", error.response?.data);
       toast.error(`Failed to ban person: ${error.response?.data?.message || error.message}`);
     }
   };
@@ -476,8 +484,6 @@ const RecordVisits = () => {
     }
 
     try {
-      console.log('Editing ban for:', selectedPerson);
-      
       const endpoint = selectedPerson.personType === 'visitor' 
         ? `${API_BASE}/visitors/${selectedPerson.id}/ban`
         : `${API_BASE}/guests/${selectedPerson.id}/ban`;
@@ -488,20 +494,14 @@ const RecordVisits = () => {
         notes: banForm.notes
       };
       
-      console.log('Sending ban data:', banData);
-      console.log('Endpoint:', endpoint);
-      
-      const response = await axios.put(endpoint, banData);
-      console.log('Ban response:', response.data);
-      
+      await axios.put(endpoint, banData);
       toast.success("Ban updated successfully");
       setShowBanModal(false);
       setSelectedPerson(null);
       fetchBanned();
     } catch (error) {
       console.error("Error updating ban:", error);
-      console.error("Error details:", error.response?.data || error.message);
-      toast.error(`Failed to update ban: ${error.response?.data?.message || error.message}`);
+      toast.error("Failed to update ban");
     }
   };
 
@@ -609,6 +609,7 @@ const RecordVisits = () => {
     return uniqueGuests.size;
   };
 
+  // FIXED: Properly aligned buttons with consistent styling
   const renderVisitTable = (data) => {
     if (data.length === 0) {
       return (
@@ -632,7 +633,7 @@ const RecordVisits = () => {
             )}
             <th>Time Details</th>
             <th>Status</th>
-            <th style={{ width: '180px' }}>Actions</th>
+            <th style={{ width: '200px' }}>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -694,52 +695,52 @@ const RecordVisits = () => {
                 )}
               </td>
               <td>
-                <div className="d-flex flex-column gap-1">
+                <div className="d-flex flex-column gap-2 align-items-stretch">
                   <Button
                     variant="outline-primary"
                     size="sm"
                     onClick={() => openDetailsModal(log)}
-                    className="d-flex align-items-center justify-content-center"
+                    className="d-flex align-items-center justify-content-start w-100"
                   >
-                    <Eye size={14} className="me-1" />
-                    View Details
+                    <Eye size={14} className="me-2 flex-shrink-0" />
+                    <span className="text-nowrap">View Details</span>
                   </Button>
                   <Button
                     variant="outline-warning"
                     size="sm"
                     onClick={() => openViolationModal(log)}
-                    className="d-flex align-items-center justify-content-center"
+                    className="d-flex align-items-center justify-content-start w-100"
                   >
-                    <AlertTriangle size={14} className="me-1" />
-                    Add Violation
+                    <AlertTriangle size={14} className="me-2 flex-shrink-0" />
+                    <span className="text-nowrap">Add Violation</span>
                   </Button>
                   <Button
                     variant="outline-danger"
                     size="sm"
                     onClick={() => openBanModal(log)}
-                    className="d-flex align-items-center justify-content-center"
+                    className="d-flex align-items-center justify-content-start w-100"
                   >
-                    <Slash size={14} className="me-1" />
-                    Ban Person
+                    <Slash size={14} className="me-2 flex-shrink-0" />
+                    <span className="text-nowrap">Ban Person</span>
                   </Button>
                   <Button
                     variant="outline-info"
                     size="sm"
                     onClick={() => handleClearTimeRecords(log)}
-                    className="d-flex align-items-center justify-content-center"
+                    className="d-flex align-items-center justify-content-start w-100"
                     title="Clear time records (allow rescan for this date)"
                   >
-                    <RefreshCw size={14} className="me-1" />
-                    Reset Time
+                    <RefreshCw size={14} className="me-2 flex-shrink-0" />
+                    <span className="text-nowrap">Reset Time</span>
                   </Button>
                   <Button
                     variant="outline-danger"
                     size="sm"
                     onClick={() => openDeleteModal(log)}
-                    className="d-flex align-items-center justify-content-center"
+                    className="d-flex align-items-center justify-content-start w-100"
                   >
-                    <Trash2 size={14} className="me-1" />
-                    Delete Record
+                    <Trash2 size={14} className="me-2 flex-shrink-0" />
+                    <span className="text-nowrap">Delete Record</span>
                   </Button>
                 </div>
               </td>
@@ -769,7 +770,7 @@ const RecordVisits = () => {
             <th>Violation Type</th>
             <th>Violation Details</th>
             <th>Visit Purpose</th>
-            <th style={{ width: '180px' }}>Actions</th>
+            <th style={{ width: '200px' }}>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -788,30 +789,30 @@ const RecordVisits = () => {
               <td>{person.violationDetails || 'No details provided'}</td>
               <td>
                 {person.personType === 'guest' ? (
-                  <span className="text-primary">{person.visitPurpose || 'General Visit'}</span>
+                  <span className="text-primary fw-bold">{person.visitPurpose || 'General Visit'}</span>
                 ) : (
                   <span className="text-muted">N/A</span>
                 )}
               </td>
               <td>
-                <div className="d-flex flex-column gap-1">
+                <div className="d-flex flex-column gap-2 align-items-stretch">
                   <Button
                     variant="outline-warning"
                     size="sm"
                     onClick={() => openEditViolationModal(person)}
-                    className="d-flex align-items-center justify-content-center"
+                    className="d-flex align-items-center justify-content-start w-100"
                   >
-                    <Edit size={14} className="me-1" />
-                    Edit Violation
+                    <Edit size={14} className="me-2 flex-shrink-0" />
+                    <span className="text-nowrap">Edit Violation</span>
                   </Button>
                   <Button
                     variant="outline-success"
                     size="sm"
                     onClick={() => handleRemoveViolation(person.id, person.personType)}
-                    className="d-flex align-items-center justify-content-center"
+                    className="d-flex align-items-center justify-content-start w-100"
                   >
-                    <CheckCircle size={14} className="me-1" />
-                    Remove Violation
+                    <CheckCircle size={14} className="me-2 flex-shrink-0" />
+                    <span className="text-nowrap">Remove Violation</span>
                   </Button>
                 </div>
               </td>
@@ -841,7 +842,7 @@ const RecordVisits = () => {
             <th>Ban Reason</th>
             <th>Ban Duration</th>
             <th>Visit Purpose</th>
-            <th style={{ width: '180px' }}>Actions</th>
+            <th style={{ width: '200px' }}>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -862,30 +863,30 @@ const RecordVisits = () => {
               </td>
               <td>
                 {person.personType === 'guest' ? (
-                  <span className="text-primary">{person.visitPurpose || 'General Visit'}</span>
+                  <span className="text-primary fw-bold">{person.visitPurpose || 'General Visit'}</span>
                 ) : (
                   <span className="text-muted">N/A</span>
                 )}
               </td>
               <td>
-                <div className="d-flex flex-column gap-1">
+                <div className="d-flex flex-column gap-2 align-items-stretch">
                   <Button
                     variant="outline-warning"
                     size="sm"
                     onClick={() => openEditBanModal(person)}
-                    className="d-flex align-items-center justify-content-center"
+                    className="d-flex align-items-center justify-content-start w-100"
                   >
-                    <Edit size={14} className="me-1" />
-                    Edit Ban
+                    <Edit size={14} className="me-2 flex-shrink-0" />
+                    <span className="text-nowrap">Edit Ban</span>
                   </Button>
                   <Button
                     variant="outline-success"
                     size="sm"
                     onClick={() => handleRemoveBan(person.id, person.personType)}
-                    className="d-flex align-items-center justify-content-center"
+                    className="d-flex align-items-center justify-content-start w-100"
                   >
-                    <CheckCircle size={14} className="me-1" />
-                    Remove Ban
+                    <CheckCircle size={14} className="me-2 flex-shrink-0" />
+                    <span className="text-nowrap">Remove Ban</span>
                   </Button>
                 </div>
               </td>
@@ -1146,8 +1147,8 @@ const RecordVisits = () => {
                     <p><strong>Name:</strong> {selectedLog.personName}</p>
                     <p><strong>ID:</strong> {selectedLog.personId}</p>
                     <p><strong>Type:</strong> {selectedLog.personType.toUpperCase()}</p>
-                    {selectedLog.personType === 'guest' && selectedLog.visitPurpose && (
-                      <p><strong>Visit Purpose:</strong> {selectedLog.visitPurpose}</p>
+                    {selectedLog.personType === 'guest' && (
+                      <p><strong>Visit Purpose:</strong> {selectedLog.visitPurpose || 'General Visit'}</p>
                     )}
                   </Card.Body>
                 </Card>
@@ -1174,21 +1175,6 @@ const RecordVisits = () => {
                   </Card.Body>
                 </Card>
               </Col>
-
-              {selectedLog.isTimerActive && (
-                <Col md={12}>
-                  <Card className="mb-3 border-warning">
-                    <Card.Header className="bg-warning text-dark">
-                      <strong>Timer Information</strong>
-                    </Card.Header>
-                    <Card.Body>
-                      <p><strong>Timer Status:</strong> <Badge bg="warning">ACTIVE</Badge></p>
-                      <p><strong>Timer Started:</strong> {selectedLog.timerStart ? new Date(selectedLog.timerStart).toLocaleString() : 'N/A'}</p>
-                      <p><strong>Timer Ends:</strong> {selectedLog.timerEnd ? new Date(selectedLog.timerEnd).toLocaleString() : 'N/A'}</p>
-                    </Card.Body>
-                  </Card>
-                </Col>
-              )}
             </Row>
           )}
         </Modal.Body>

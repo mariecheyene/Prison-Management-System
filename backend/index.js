@@ -2375,13 +2375,14 @@ app.get("/health", async (req, res) => {
 });
 
 // ======================
-// VIOLATION ENDPOINTS
+// VIOLATION ENDPOINTS - ADD THESE
 // ======================
 
 // Add violation to visitor
 app.put("/visitors/:id/violation", async (req, res) => {
   try {
     const { violationType, violationDetails } = req.body;
+    console.log('Adding violation to visitor:', req.params.id, violationType);
     
     const updatedVisitor = await Visitor.findOneAndUpdate(
       { id: req.params.id },
@@ -2411,6 +2412,7 @@ app.put("/visitors/:id/violation", async (req, res) => {
 app.put("/guests/:id/violation", async (req, res) => {
   try {
     const { violationType, violationDetails } = req.body;
+    console.log('Adding violation to guest:', req.params.id, violationType);
     
     const updatedGuest = await Guest.findOneAndUpdate(
       { id: req.params.id },
@@ -2491,13 +2493,14 @@ app.put("/guests/:id/remove-violation", async (req, res) => {
 });
 
 // ======================
-// BAN ENDPOINTS
+// BAN ENDPOINTS - ADD THESE
 // ======================
 
 // Ban visitor
 app.put("/visitors/:id/ban", async (req, res) => {
   try {
     const { reason, duration, notes } = req.body;
+    console.log('Banning visitor:', req.params.id, reason);
     
     const updatedVisitor = await Visitor.findOneAndUpdate(
       { id: req.params.id },
@@ -2529,6 +2532,7 @@ app.put("/visitors/:id/ban", async (req, res) => {
 app.put("/guests/:id/ban", async (req, res) => {
   try {
     const { reason, duration, notes } = req.body;
+    console.log('Banning guest:', req.params.id, reason);
     
     const updatedGuest = await Guest.findOneAndUpdate(
       { id: req.params.id },
@@ -2611,5 +2615,639 @@ app.put("/guests/:id/remove-ban", async (req, res) => {
   } catch (error) {
     console.error("Error removing ban from guest:", error);
     res.status(500).json({ message: "Failed to remove ban", error: error.message });
+  }
+});
+
+// ======================
+// PENDING GUEST SCHEMA
+// ======================
+
+const pendingGuestSchema = new mongoose.Schema({
+  id: { type: String, required: true, unique: true },
+  lastName: { type: String, required: true },
+  firstName: { type: String, required: true },
+  middleName: String,
+  extension: String,
+  
+  // Guest details
+  photo: String,
+  dateOfBirth: Date,
+  age: Number,
+  sex: { type: String, enum: ['Male', 'Female'] },
+  address: String,
+  contact: String,
+  
+  // Visit details
+  visitPurpose: { type: String, required: true },
+  
+  // Violation fields
+  violationType: String,
+  violationDetails: String,
+  
+  // Status and tracking
+  status: { 
+    type: String, 
+    enum: ['pending', 'approved', 'rejected'], 
+    default: 'pending' 
+  },
+  submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  submittedByName: String,
+  approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  approvedAt: Date,
+  rejectedAt: Date,
+  submissionDate: { type: Date, default: Date.now },
+  
+  // System fields
+  qrCode: String
+}, { timestamps: true });
+
+pendingGuestSchema.virtual('fullName').get(function() {
+  return `${this.lastName}, ${this.firstName} ${this.middleName || ''} ${this.extension || ''}`.trim();
+});
+
+const PendingGuest = mongoose.model('PendingGuest', pendingGuestSchema);
+
+// ======================
+// PENDING GUEST ENDPOINTS
+// ======================
+
+// CREATE PENDING GUEST (Staff submission)
+app.post("/pending-guests", 
+  upload.single('photo'),
+  async (req, res) => {
+    try {
+      const seq = await autoIncrement('pendingGuestId');
+      const id = `PGS${seq}`;
+
+      const pendingGuestData = {
+        ...req.body,
+        id,
+        dateOfBirth: req.body.dateOfBirth ? new Date(req.body.dateOfBirth) : null,
+        status: 'pending',
+        submissionDate: new Date()
+      };
+
+      if (req.file) {
+        pendingGuestData.photo = req.file.filename;
+      }
+
+      // Generate QR code for pending guest
+      const qrData = {
+        id,
+        lastName: pendingGuestData.lastName,
+        firstName: pendingGuestData.firstName,
+        middleName: pendingGuestData.middleName,
+        extension: pendingGuestData.extension,
+        visitPurpose: pendingGuestData.visitPurpose,
+        type: 'pending-guest'
+      };
+      pendingGuestData.qrCode = await generateQRCode(qrData);
+
+      const pendingGuest = new PendingGuest(pendingGuestData);
+      await pendingGuest.save();
+
+      const pendingGuestWithFullName = {
+        ...pendingGuest.toObject(),
+        fullName: pendingGuest.fullName
+      };
+
+      res.status(201).json({ 
+        message: "Guest request submitted successfully! Waiting for admin approval.", 
+        pendingGuest: pendingGuestWithFullName 
+      });
+    } catch (error) {
+      console.error("Pending guest creation error:", error);
+      
+      if (error.code === 11000) {
+        return res.status(409).json({ message: "Pending guest ID already exists" });
+      }
+      
+      if (error.name === 'ValidationError') {
+        return res.status(400).json({ message: "Validation error", error: error.message });
+      }
+      
+      res.status(500).json({ message: "Failed to submit guest request", error: error.message });
+    }
+  }
+);
+
+// GET ALL PENDING GUESTS (For admin approval)
+app.get("/pending-guests", async (req, res) => {
+  try {
+    const pendingGuests = await PendingGuest.find().sort({ createdAt: -1 });
+    const pendingGuestsWithFullName = pendingGuests.map(guest => ({
+      ...guest.toObject(),
+      fullName: guest.fullName
+    }));
+    res.json(pendingGuestsWithFullName);
+  } catch (error) {
+    res.status(500).json({ message: "Fetch failed", error: error.message });
+  }
+});
+
+// GET PENDING GUEST BY ID
+app.get("/pending-guests/:id", async (req, res) => {
+  try {
+    const pendingGuest = await PendingGuest.findOne({ id: req.params.id });
+    if (!pendingGuest) return res.status(404).json({ message: "Pending guest not found" });
+    
+    const pendingGuestWithFullName = {
+      ...pendingGuest.toObject(),
+      fullName: pendingGuest.fullName
+    };
+    res.json(pendingGuestWithFullName);
+  } catch (error) {
+    res.status(500).json({ message: "Fetch failed", error: error.message });
+  }
+});
+
+// APPROVE PENDING GUEST (Move to main Guest collection)
+app.put("/pending-guests/:id/approve", async (req, res) => {
+  try {
+    const pendingGuest = await PendingGuest.findOne({ id: req.params.id });
+    if (!pendingGuest) {
+      return res.status(404).json({ message: "Pending guest not found" });
+    }
+
+    if (pendingGuest.status !== 'pending') {
+      return res.status(400).json({ message: "Guest request already processed" });
+    }
+
+    // Create new guest in main Guest collection
+    const guestData = {
+      id: `GST${await autoIncrement('guestId')}`,
+      lastName: pendingGuest.lastName,
+      firstName: pendingGuest.firstName,
+      middleName: pendingGuest.middleName,
+      extension: pendingGuest.extension,
+      photo: pendingGuest.photo,
+      dateOfBirth: pendingGuest.dateOfBirth,
+      age: pendingGuest.age,
+      sex: pendingGuest.sex,
+      address: pendingGuest.address,
+      contact: pendingGuest.contact,
+      visitPurpose: pendingGuest.visitPurpose,
+      violationType: pendingGuest.violationType,
+      violationDetails: pendingGuest.violationDetails,
+      status: 'approved',
+      approvedBy: req.body.approvedBy, // Admin user ID
+      approvedAt: new Date(),
+      dailyVisits: [],
+      currentDayStatus: {
+        visitDate: null,
+        hasTimedIn: false,
+        hasTimedOut: false,
+        timeIn: null,
+        timeOut: null
+      }
+    };
+
+    // Generate QR code for approved guest
+    const qrData = {
+      id: guestData.id,
+      lastName: guestData.lastName,
+      firstName: guestData.firstName,
+      middleName: guestData.middleName,
+      extension: guestData.extension,
+      visitPurpose: guestData.visitPurpose,
+      type: 'guest'
+    };
+    guestData.qrCode = await generateQRCode(qrData);
+
+    const guest = new Guest(guestData);
+    await guest.save();
+
+    // Update pending guest status
+    pendingGuest.status = 'approved';
+    pendingGuest.approvedBy = req.body.approvedBy;
+    pendingGuest.approvedAt = new Date();
+    await pendingGuest.save();
+
+    const guestWithFullName = {
+      ...guest.toObject(),
+      fullName: guest.fullName
+    };
+
+    res.json({ 
+      message: "Guest approved successfully and moved to guest list",
+      guest: guestWithFullName,
+      pendingGuest: pendingGuest
+    });
+
+  } catch (error) {
+    console.error("Error approving pending guest:", error);
+    res.status(500).json({ message: "Failed to approve guest", error: error.message });
+  }
+});
+
+// REJECT PENDING GUEST
+app.put("/pending-guests/:id/reject", async (req, res) => {
+  try {
+    const pendingGuest = await PendingGuest.findOne({ id: req.params.id });
+    if (!pendingGuest) {
+      return res.status(404).json({ message: "Pending guest not found" });
+    }
+
+    if (pendingGuest.status !== 'pending') {
+      return res.status(400).json({ message: "Guest request already processed" });
+    }
+
+    pendingGuest.status = 'rejected';
+    pendingGuest.rejectedBy = req.body.rejectedBy;
+    pendingGuest.rejectedAt = new Date();
+    pendingGuest.rejectionReason = req.body.rejectionReason;
+
+    await pendingGuest.save();
+
+    res.json({ 
+      message: "Guest request rejected successfully",
+      pendingGuest: pendingGuest
+    });
+
+  } catch (error) {
+    console.error("Error rejecting pending guest:", error);
+    res.status(500).json({ message: "Failed to reject guest", error: error.message });
+  }
+});
+
+// DELETE PENDING GUEST
+app.delete("/pending-guests/:id", async (req, res) => {
+  try {
+    const deletedPendingGuest = await PendingGuest.findOneAndDelete({ id: req.params.id });
+    if (!deletedPendingGuest) return res.status(404).json({ message: "Not found" });
+    
+    if (deletedPendingGuest.photo) {
+      const photoPath = path.join(uploadDir, deletedPendingGuest.photo);
+      if (fs.existsSync(photoPath)) fs.unlinkSync(photoPath);
+    }
+    
+    res.json({ message: "Pending guest deleted" });
+  } catch (error) {
+    res.status(500).json({ message: "Delete failed", error: error.message });
+  }
+});
+
+// ======================
+// ANALYTICS ENDPOINTS
+// ======================
+
+// Get analytics data with comprehensive reporting
+app.get("/analytics/reports", async (req, res) => {
+  try {
+    const { startDate, endDate, reportType = 'daily' } = req.query;
+    
+    console.log('📊 Analytics request:', { startDate, endDate, reportType });
+
+    // Build date filter
+    let dateFilter = {};
+    if (startDate && endDate) {
+      dateFilter.visitDate = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate + 'T23:59:59.999Z')
+      };
+    }
+
+    // Fetch all necessary data
+    const [visitLogs, inmates, visitors, guests] = await Promise.all([
+      VisitLog.find(dateFilter).sort({ visitDate: 1 }),
+      Inmate.find(),
+      Visitor.find(),
+      Guest.find()
+    ]);
+
+    console.log('📈 Data counts:', {
+      visitLogs: visitLogs.length,
+      inmates: inmates.length,
+      visitors: visitors.length,
+      guests: guests.length
+    });
+
+    // Process data based on report type
+    let chartData = [];
+    let summaryData = {};
+
+    switch (reportType) {
+      case 'daily':
+        chartData = processDailyAnalytics(visitLogs);
+        summaryData = calculateDailySummary(chartData, visitLogs);
+        break;
+      case 'weekly':
+        chartData = processWeeklyAnalytics(visitLogs);
+        summaryData = calculateWeeklySummary(chartData, visitLogs);
+        break;
+      case 'monthly':
+        chartData = processMonthlyAnalytics(visitLogs);
+        summaryData = calculateMonthlySummary(chartData, visitLogs);
+        break;
+      case 'yearly':
+        chartData = processYearlyAnalytics(visitLogs);
+        summaryData = calculateYearlySummary(chartData, visitLogs);
+        break;
+      case 'demographic':
+        chartData = processDemographicAnalytics(visitors, guests, inmates);
+        summaryData = calculateDemographicSummary(visitors, guests, inmates);
+        break;
+      case 'performance':
+        chartData = processPerformanceAnalytics(visitLogs);
+        summaryData = calculatePerformanceSummary(visitLogs);
+        break;
+      default:
+        chartData = processDailyAnalytics(visitLogs);
+        summaryData = calculateDailySummary(chartData, visitLogs);
+    }
+
+    res.json({
+      success: true,
+      chartData,
+      summaryData,
+      rawData: {
+        visitLogs: visitLogs.length,
+        inmates: inmates.length,
+        visitors: visitors.length,
+        guests: guests.length
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Analytics error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to generate analytics', 
+      error: error.message 
+    });
+  }
+});
+
+// Analytics processing functions
+function processDailyAnalytics(visitLogs) {
+  const dailyCounts = {};
+  
+  visitLogs.forEach(log => {
+    if (!log.visitDate) return;
+    
+    const date = new Date(log.visitDate);
+    const dateKey = date.toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: '2-digit', 
+      day: '2-digit' 
+    });
+    
+    dailyCounts[dateKey] = (dailyCounts[dateKey] || 0) + 1;
+  });
+
+  return Object.entries(dailyCounts).map(([date, count]) => ({
+    date,
+    visitors: count,
+    name: date
+  })).sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
+function processWeeklyAnalytics(visitLogs) {
+  const weeklyCounts = {};
+  
+  visitLogs.forEach(log => {
+    if (!log.visitDate) return;
+    
+    const date = new Date(log.visitDate);
+    const weekStart = new Date(date);
+    weekStart.setDate(date.getDate() - date.getDay()); // Start of week (Sunday)
+    
+    const weekKey = weekStart.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric' 
+    });
+    
+    weeklyCounts[weekKey] = (weeklyCounts[weekKey] || 0) + 1;
+  });
+
+  return Object.entries(weeklyCounts).map(([week, count]) => ({
+    week: `Week of ${week}`,
+    visitors: count,
+    name: `Week of ${week}`
+  })).sort((a, b) => new Date(a.week) - new Date(b.week));
+}
+
+function processMonthlyAnalytics(visitLogs) {
+  const monthlyCounts = {};
+  
+  visitLogs.forEach(log => {
+    if (!log.visitDate) return;
+    
+    const date = new Date(log.visitDate);
+    const monthKey = date.toLocaleDateString('en-US', { 
+      month: 'long', 
+      year: 'numeric' 
+    });
+    
+    monthlyCounts[monthKey] = (monthlyCounts[monthKey] || 0) + 1;
+  });
+
+  return Object.entries(monthlyCounts).map(([month, count]) => ({
+    month,
+    visitors: count,
+    name: month
+  })).sort((a, b) => new Date(a.month) - new Date(b.month));
+}
+
+function processYearlyAnalytics(visitLogs) {
+  const yearlyCounts = {};
+  
+  visitLogs.forEach(log => {
+    if (!log.visitDate) return;
+    
+    const year = new Date(log.visitDate).getFullYear();
+    yearlyCounts[year] = (yearlyCounts[year] || 0) + 1;
+  });
+
+  return Object.entries(yearlyCounts).map(([year, count]) => ({
+    year: year.toString(),
+    visitors: count,
+    name: year.toString()
+  })).sort((a, b) => a.year - b.year);
+}
+
+function processDemographicAnalytics(visitors, guests, inmates) {
+  // Gender distribution
+  const genderData = [
+    { name: 'Male Visitors', value: visitors.filter(v => v.sex === 'Male').length },
+    { name: 'Female Visitors', value: visitors.filter(v => v.sex === 'Female').length },
+    { name: 'Male Guests', value: guests.filter(g => g.sex === 'Male').length },
+    { name: 'Female Guests', value: guests.filter(g => g.sex === 'Female').length },
+    { name: 'Male Inmates', value: inmates.filter(i => i.sex === 'Male').length },
+    { name: 'Female Inmates', value: inmates.filter(i => i.sex === 'Female').length }
+  ];
+
+  return genderData.filter(item => item.value > 0);
+}
+
+function processPerformanceAnalytics(visitLogs) {
+  const performanceByDay = {};
+  
+  visitLogs.forEach(log => {
+    if (!log.visitDate || !log.visitDuration) return;
+    
+    const date = new Date(log.visitDate).toLocaleDateString();
+    
+    if (!performanceByDay[date]) {
+      performanceByDay[date] = { totalMinutes: 0, count: 0 };
+    }
+    
+    // Parse duration (format: "Xh Ym")
+    const durationMatch = log.visitDuration.match(/(\d+)h\s*(\d+)m/);
+    if (durationMatch) {
+      const hours = parseInt(durationMatch[1]);
+      const minutes = parseInt(durationMatch[2]);
+      performanceByDay[date].totalMinutes += (hours * 60) + minutes;
+      performanceByDay[date].count += 1;
+    }
+  });
+
+  return Object.entries(performanceByDay).map(([date, data]) => ({
+    date,
+    avgDuration: Math.round(data.totalMinutes / data.count),
+    visits: data.count,
+    name: date
+  })).sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
+// Summary calculation functions
+function calculateDailySummary(data, visitLogs) {
+  const totalVisits = visitLogs.length;
+  const avgVisitsPerDay = totalVisits / (data.length || 1);
+  const completedVisits = visitLogs.filter(log => log.status === 'completed').length;
+  const peakDay = data.reduce((max, day) => day.visitors > max.visitors ? day : max, { visitors: 0 });
+  
+  return {
+    totalVisits,
+    avgVisitsPerDay: Math.round(avgVisitsPerDay),
+    completionRate: totalVisits > 0 ? Math.round((completedVisits / totalVisits) * 100) : 0,
+    peakDay: peakDay.visitors > 0 ? `${peakDay.date}: ${peakDay.visitors} visits` : 'No data'
+  };
+}
+
+function calculateWeeklySummary(data, visitLogs) {
+  const totalVisits = visitLogs.length;
+  const avgVisitsPerWeek = totalVisits / (data.length || 1);
+  const peakWeek = data.reduce((max, week) => week.visitors > max.visitors ? week : max, { visitors: 0 });
+  
+  return {
+    totalVisits,
+    avgVisitsPerWeek: Math.round(avgVisitsPerWeek),
+    peakWeek: peakWeek.visitors > 0 ? `${peakWeek.name}: ${peakWeek.visitors} visits` : 'No data'
+  };
+}
+
+function calculateMonthlySummary(data, visitLogs) {
+  const totalVisits = visitLogs.length;
+  const currentMonth = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const currentMonthData = data.find(item => item.month === currentMonth);
+  const peakMonth = data.reduce((max, month) => month.visitors > max.visitors ? month : max, { visitors: 0 });
+  
+  return {
+    totalVisits,
+    currentMonthVisits: currentMonthData ? currentMonthData.visitors : 0,
+    peakMonth: peakMonth.visitors > 0 ? `${peakMonth.month}: ${peakMonth.visitors} visits` : 'No data'
+  };
+}
+
+function calculateYearlySummary(data, visitLogs) {
+  const totalVisits = visitLogs.length;
+  const currentYear = new Date().getFullYear().toString();
+  const currentYearData = data.find(item => item.year === currentYear);
+  
+  return {
+    totalVisits,
+    currentYearVisits: currentYearData ? currentYearData.visitors : 0,
+    growthRate: calculateGrowthRate(data)
+  };
+}
+
+function calculateDemographicSummary(visitors, guests, inmates) {
+  const totalVisitors = visitors.length;
+  const totalGuests = guests.length;
+  const totalInmates = inmates.length;
+  const maleInmates = inmates.filter(i => i.sex === 'Male').length;
+  const femaleInmates = inmates.filter(i => i.sex === 'Female').length;
+  const genderRatio = totalInmates > 0 ? Math.round((maleInmates / totalInmates) * 100) : 0;
+  
+  return {
+    totalVisitors,
+    totalGuests,
+    totalInmates,
+    maleInmates,
+    femaleInmates,
+    genderRatio: `${genderRatio}% Male`
+  };
+}
+
+function calculatePerformanceSummary(visitLogs) {
+  const completedVisits = visitLogs.filter(log => log.status === 'completed');
+  let totalMinutes = 0;
+  let validDurations = 0;
+
+  completedVisits.forEach(log => {
+    if (log.visitDuration) {
+      const match = log.visitDuration.match(/(\d+)h\s*(\d+)m/);
+      if (match) {
+        totalMinutes += (parseInt(match[1]) * 60) + parseInt(match[2]);
+        validDurations += 1;
+      }
+    }
+  });
+
+  const avgDuration = validDurations > 0 ? totalMinutes / validDurations : 0;
+  const efficiency = visitLogs.length > 0 ? Math.round((completedVisits.length / visitLogs.length) * 100) : 0;
+
+  return {
+    avgVisitDuration: Math.round(avgDuration),
+    totalCompletedVisits: completedVisits.length,
+    efficiency: `${efficiency}%`
+  };
+}
+
+function calculateGrowthRate(data) {
+  if (data.length < 2) return '0%';
+  
+  const currentYear = data[data.length - 1].visitors;
+  const previousYear = data[data.length - 2].visitors;
+  const growth = ((currentYear - previousYear) / previousYear) * 100;
+  
+  return `${Math.round(growth)}%`;
+}
+
+// Get sample data for testing
+app.get("/analytics/sample-data", async (req, res) => {
+  try {
+    // Create sample visit logs for testing
+    const sampleData = [
+      { date: '1/15/2024', visitors: 8, name: '1/15/2024' },
+      { date: '1/16/2024', visitors: 12, name: '1/16/2024' },
+      { date: '1/17/2024', visitors: 15, name: '1/17/2024' },
+      { date: '1/18/2024', visitors: 10, name: '1/18/2024' },
+      { date: '1/19/2024', visitors: 18, name: '1/19/2024' },
+      { date: '1/20/2024', visitors: 14, name: '1/20/2024' },
+      { date: '1/21/2024', visitors: 11, name: '1/21/2024' },
+    ];
+
+    const sampleSummary = {
+      totalVisits: 88,
+      avgVisitsPerDay: 13,
+      completionRate: 92,
+      peakDay: '1/19/2024: 18 visits'
+    };
+
+    res.json({
+      success: true,
+      chartData: sampleData,
+      summaryData: sampleSummary,
+      message: 'Sample data loaded for demonstration'
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to generate sample data', 
+      error: error.message 
+    });
   }
 });

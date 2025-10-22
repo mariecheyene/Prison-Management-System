@@ -246,7 +246,7 @@ const Login = () => {
         >
           <img
             src="/img/logo.jpg"
-            alt="Prison Management Logo"
+            alt="Visitor Management Logo"
             style={{
               width: "120px",
               height: "120px",

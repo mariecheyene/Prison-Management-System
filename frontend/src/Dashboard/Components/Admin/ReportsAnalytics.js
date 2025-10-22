@@ -75,277 +75,65 @@ const ReportsAnalytics = () => {
         reportType
       };
 
-      // Fetch visit logs for analytics
-      const visitLogsResponse = await axios.get('/visit-logs', { params });
-      const visitLogs = visitLogsResponse.data;
+      console.log('🔄 Fetching analytics with params:', params);
 
-      // Fetch additional data for comprehensive reports
-      const [inmatesResponse, visitorsResponse, guestsResponse] = await Promise.all([
-        axios.get('/inmates'),
-        axios.get('/visitors'),
-        axios.get('/guests')
-      ]);
-
-      const allData = {
-        visitLogs,
-        inmates: inmatesResponse.data,
-        visitors: visitorsResponse.data,
-        guests: guestsResponse.data
-      };
-
-      setRawData(allData);
-      processAnalyticsData(allData);
+      // Use the new analytics endpoint
+      const response = await axios.get('/analytics/reports', { params });
+      
+      if (response.data.success) {
+        setChartData(response.data.chartData || []);
+        setSummaryData(response.data.summaryData || {});
+        setRawData(response.data.rawData || []);
+        
+        console.log('✅ Analytics data loaded:', {
+          chartData: response.data.chartData?.length,
+          summaryData: response.data.summaryData
+        });
+      } else {
+        throw new Error(response.data.message || 'Failed to fetch analytics');
+      }
     } catch (err) {
-      console.error('Error fetching analytics data:', err);
-      setError('Failed to load analytics data');
+      console.error('❌ Error fetching analytics data:', err);
+      
+      // If there's no data, show sample data for demonstration
+      if (err.response?.status === 404 || err.message.includes('No data')) {
+        setError('No visit data found. Showing sample data for demonstration.');
+        loadSampleData();
+      } else {
+        setError('Failed to load analytics data: ' + (err.response?.data?.message || err.message));
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const processAnalyticsData = (data) => {
-    const { visitLogs, inmates, visitors, guests } = data;
-    
-    // Process data based on report type
-    let processedData = [];
-    let summary = {};
+  const loadSampleData = async () => {
+    try {
+      const response = await axios.get('/analytics/sample-data');
+      if (response.data.success) {
+        setChartData(response.data.chartData);
+        setSummaryData(response.data.summaryData);
+      }
+    } catch (err) {
+      // Fallback to local sample data
+      const sampleData = [
+        { date: '1/15/2024', visitors: 8, name: '1/15/2024' },
+        { date: '1/16/2024', visitors: 12, name: '1/16/2024' },
+        { date: '1/17/2024', visitors: 15, name: '1/17/2024' },
+        { date: '1/18/2024', visitors: 10, name: '1/18/2024' },
+        { date: '1/19/2024', visitors: 18, name: '1/19/2024' },
+      ];
 
-    switch (reportType) {
-      case 'daily':
-        processedData = processDailyData(visitLogs);
-        summary = calculateDailySummary(processedData, visitLogs);
-        break;
-      case 'weekly':
-        processedData = processWeeklyData(visitLogs);
-        summary = calculateWeeklySummary(processedData, visitLogs);
-        break;
-      case 'monthly':
-        processedData = processMonthlyData(visitLogs);
-        summary = calculateMonthlySummary(processedData, visitLogs);
-        break;
-      case 'yearly':
-        processedData = processYearlyData(visitLogs);
-        summary = calculateYearlySummary(processedData, visitLogs);
-        break;
-      case 'demographic':
-        processedData = processDemographicData(visitors, guests, inmates);
-        summary = calculateDemographicSummary(visitors, guests, inmates);
-        break;
-      case 'performance':
-        processedData = processPerformanceData(visitLogs);
-        summary = calculatePerformanceSummary(visitLogs);
-        break;
-      default:
-        processedData = processDailyData(visitLogs);
-        summary = calculateDailySummary(processedData, visitLogs);
+      const sampleSummary = {
+        totalVisits: 63,
+        avgVisitsPerDay: 13,
+        completionRate: 95,
+        peakDay: '1/19/2024: 18 visits'
+      };
+
+      setChartData(sampleData);
+      setSummaryData(sampleSummary);
     }
-
-    setChartData(processedData);
-    setSummaryData(summary);
-  };
-
-  // Data processing functions
-  const processDailyData = (visitLogs) => {
-    const dailyCounts = {};
-    
-    visitLogs.forEach(log => {
-      const date = new Date(log.visitDate).toLocaleDateString();
-      dailyCounts[date] = (dailyCounts[date] || 0) + 1;
-    });
-
-    return Object.entries(dailyCounts).map(([date, count]) => ({
-      date,
-      visitors: count,
-      name: date
-    })).sort((a, b) => new Date(a.date) - new Date(b.date));
-  };
-
-  const processWeeklyData = (visitLogs) => {
-    const weeklyCounts = {};
-    
-    visitLogs.forEach(log => {
-      const date = new Date(log.visitDate);
-      const weekStart = new Date(date.setDate(date.getDate() - date.getDay()));
-      const weekKey = weekStart.toLocaleDateString();
-      
-      weeklyCounts[weekKey] = (weeklyCounts[weekKey] || 0) + 1;
-    });
-
-    return Object.entries(weeklyCounts).map(([week, count]) => ({
-      week: `Week of ${week}`,
-      visitors: count,
-      name: `Week of ${week}`
-    })).sort((a, b) => new Date(a.week) - new Date(b.week));
-  };
-
-  const processMonthlyData = (visitLogs) => {
-    const monthlyCounts = {};
-    
-    visitLogs.forEach(log => {
-      const date = new Date(log.visitDate);
-      const monthKey = date.toLocaleString('default', { month: 'long', year: 'numeric' });
-      
-      monthlyCounts[monthKey] = (monthlyCounts[monthKey] || 0) + 1;
-    });
-
-    return Object.entries(monthlyCounts).map(([month, count]) => ({
-      month,
-      visitors: count,
-      name: month
-    })).sort((a, b) => new Date(a.month) - new Date(b.month));
-  };
-
-  const processYearlyData = (visitLogs) => {
-    const yearlyCounts = {};
-    
-    visitLogs.forEach(log => {
-      const year = new Date(log.visitDate).getFullYear();
-      yearlyCounts[year] = (yearlyCounts[year] || 0) + 1;
-    });
-
-    return Object.entries(yearlyCounts).map(([year, count]) => ({
-      year: year.toString(),
-      visitors: count,
-      name: year.toString()
-    })).sort((a, b) => a.year - b.year);
-  };
-
-  const processDemographicData = (visitors, guests, inmates) => {
-    // Gender distribution
-    const genderData = [
-      { name: 'Male Visitors', value: visitors.filter(v => v.sex === 'Male').length },
-      { name: 'Female Visitors', value: visitors.filter(v => v.sex === 'Female').length },
-      { name: 'Male Guests', value: guests.filter(g => g.sex === 'Male').length },
-      { name: 'Female Guests', value: guests.filter(g => g.sex === 'Female').length },
-      { name: 'Male Inmates', value: inmates.filter(i => i.sex === 'Male').length },
-      { name: 'Female Inmates', value: inmates.filter(i => i.sex === 'Female').length }
-    ];
-
-    return genderData.filter(item => item.value > 0);
-  };
-
-  const processPerformanceData = (visitLogs) => {
-    // Average visit duration by day
-    const durationByDay = {};
-    
-    visitLogs.forEach(log => {
-      if (log.visitDuration) {
-        const date = new Date(log.visitDate).toLocaleDateString();
-        if (!durationByDay[date]) {
-          durationByDay[date] = { totalMinutes: 0, count: 0 };
-        }
-        
-        // Parse duration (format: "Xh Ym")
-        const durationMatch = log.visitDuration.match(/(\d+)h\s*(\d+)m/);
-        if (durationMatch) {
-          const hours = parseInt(durationMatch[1]);
-          const minutes = parseInt(durationMatch[2]);
-          durationByDay[date].totalMinutes += (hours * 60) + minutes;
-          durationByDay[date].count += 1;
-        }
-      }
-    });
-
-    return Object.entries(durationByDay).map(([date, data]) => ({
-      date,
-      avgDuration: Math.round(data.totalMinutes / data.count),
-      visits: data.count,
-      name: date
-    })).sort((a, b) => new Date(a.date) - new Date(b.date));
-  };
-
-  // Summary calculation functions
-  const calculateDailySummary = (data, visitLogs) => {
-    const totalVisits = visitLogs.length;
-    const avgVisitsPerDay = totalVisits / (data.length || 1);
-    const completedVisits = visitLogs.filter(log => log.status === 'completed').length;
-    
-    return {
-      totalVisits,
-      avgVisitsPerDay: Math.round(avgVisitsPerDay),
-      completionRate: Math.round((completedVisits / totalVisits) * 100),
-      peakDay: data.reduce((max, day) => day.visitors > max.visitors ? day : max, { visitors: 0 })
-    };
-  };
-
-  const calculateWeeklySummary = (data, visitLogs) => {
-    const totalVisits = visitLogs.length;
-    const avgVisitsPerWeek = totalVisits / (data.length || 1);
-    
-    return {
-      totalVisits,
-      avgVisitsPerWeek: Math.round(avgVisitsPerWeek),
-      peakWeek: data.reduce((max, week) => week.visitors > max.visitors ? week : max, { visitors: 0 })
-    };
-  };
-
-  const calculateMonthlySummary = (data, visitLogs) => {
-    const totalVisits = visitLogs.length;
-    const currentMonth = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
-    const currentMonthData = data.find(item => item.month === currentMonth);
-    
-    return {
-      totalVisits,
-      currentMonthVisits: currentMonthData ? currentMonthData.visitors : 0,
-      peakMonth: data.reduce((max, month) => month.visitors > max.visitors ? month : max, { visitors: 0 })
-    };
-  };
-
-  const calculateYearlySummary = (data, visitLogs) => {
-    const totalVisits = visitLogs.length;
-    const currentYear = new Date().getFullYear().toString();
-    const currentYearData = data.find(item => item.year === currentYear);
-    
-    return {
-      totalVisits,
-      currentYearVisits: currentYearData ? currentYearData.visitors : 0,
-      growthRate: calculateGrowthRate(data)
-    };
-  };
-
-  const calculateDemographicSummary = (visitors, guests, inmates) => {
-    const totalVisitors = visitors.length;
-    const totalGuests = guests.length;
-    const totalInmates = inmates.length;
-    const maleInmates = inmates.filter(i => i.sex === 'Male').length;
-    const femaleInmates = inmates.filter(i => i.sex === 'Female').length;
-    
-    return {
-      totalVisitors,
-      totalGuests,
-      totalInmates,
-      maleInmates,
-      femaleInmates,
-      genderRatio: Math.round((maleInmates / totalInmates) * 100) || 0
-    };
-  };
-
-  const calculatePerformanceSummary = (visitLogs) => {
-    const completedVisits = visitLogs.filter(log => log.status === 'completed');
-    const avgDuration = completedVisits.reduce((total, log) => {
-      if (log.visitDuration) {
-        const match = log.visitDuration.match(/(\d+)h\s*(\d+)m/);
-        if (match) {
-          return total + (parseInt(match[1]) * 60) + parseInt(match[2]);
-        }
-      }
-      return total;
-    }, 0) / (completedVisits.length || 1);
-
-    return {
-      avgVisitDuration: Math.round(avgDuration),
-      totalCompletedVisits: completedVisits.length,
-      efficiency: Math.round((completedVisits.length / visitLogs.length) * 100)
-    };
-  };
-
-  const calculateGrowthRate = (data) => {
-    if (data.length < 2) return 0;
-    
-    const currentYear = data[data.length - 1].visitors;
-    const previousYear = data[data.length - 2].visitors;
-    
-    return Math.round(((currentYear - previousYear) / previousYear) * 100);
   };
 
   // Export to PDF function
@@ -422,11 +210,18 @@ const ReportsAnalytics = () => {
 
   // Render appropriate chart based on report type
   const renderChart = () => {
-    if (chartData.length === 0) {
+    console.log('📊 Rendering chart with data:', chartData);
+
+    if (!chartData || chartData.length === 0) {
       return (
-        <Box display="flex" justifyContent="center" alignItems="center" height={400}>
-          <Typography variant="h6" color="textSecondary">
-            No data available for the selected criteria
+        <Box display="flex" justifyContent="center" alignItems="center" height={400} flexDirection="column">
+          <Typography variant="h6" color="textSecondary" gutterBottom>
+            No Data Available
+          </Typography>
+          <Typography variant="body2" color="textSecondary" align="center">
+            No analytics data found for the selected criteria.
+            <br />
+            Try adjusting your date range or check if there are visit logs in the system.
           </Typography>
         </Box>
       );
@@ -451,7 +246,7 @@ const ReportsAnalytics = () => {
                   <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip />
+              <Tooltip formatter={(value) => [`${value} people`, 'Count']} />
               <Legend />
             </PieChart>
           </ResponsiveContainer>
@@ -465,7 +260,12 @@ const ReportsAnalytics = () => {
               <XAxis dataKey="name" />
               <YAxis yAxisId="left" orientation="left" stroke="#8884d8" />
               <YAxis yAxisId="right" orientation="right" stroke="#82ca9d" />
-              <Tooltip />
+              <Tooltip 
+                formatter={(value, name) => {
+                  if (name === 'Avg Duration') return [`${value} minutes`, name];
+                  return [value, name];
+                }}
+              />
               <Legend />
               <Bar yAxisId="left" dataKey="avgDuration" fill="#8884d8" name="Avg Duration (mins)" />
               <Bar yAxisId="right" dataKey="visits" fill="#82ca9d" name="Number of Visits" />
@@ -489,11 +289,47 @@ const ReportsAnalytics = () => {
                 strokeWidth={2}
                 dot={{ fill: '#8884d8', strokeWidth: 2, r: 4 }}
                 activeDot={{ r: 6, stroke: '#8884d8', strokeWidth: 2 }}
+                name="Number of Visitors"
               />
             </LineChart>
           </ResponsiveContainer>
         );
     }
+  };
+
+  const getSummaryCards = () => {
+    if (Object.keys(summaryData).length === 0) {
+      return (
+        <Grid item xs={12}>
+          <Card>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                No Summary Data Available
+              </Typography>
+              <Typography variant="body2">
+                No analytics data to display summary statistics.
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      );
+    }
+
+    return Object.entries(summaryData).map(([key, value], index) => (
+      <Grid item xs={12} sm={6} md={3} key={key}>
+        <Card sx={{ height: '100%' }}>
+          <CardContent>
+            <Typography color="textSecondary" gutterBottom variant="overline" sx={{ fontSize: '0.7rem' }}>
+              {key.replace(/([A-Z])/g, ' $1').toUpperCase()}
+            </Typography>
+            <Typography variant="h5" component="div" sx={{ fontWeight: 'bold' }}>
+              {typeof value === 'object' ? JSON.stringify(value) : value}
+              {key.includes('Rate') || key.includes('Ratio') ? '%' : ''}
+            </Typography>
+          </CardContent>
+        </Card>
+      </Grid>
+    ));
   };
 
   return (
@@ -515,7 +351,19 @@ const ReportsAnalytics = () => {
         </Box>
 
         {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
+          <Alert 
+            severity={error.includes('sample data') ? 'info' : 'error'} 
+            sx={{ mb: 2 }}
+            action={
+              <Button 
+                color="inherit" 
+                size="small" 
+                onClick={fetchAnalyticsData}
+              >
+                RETRY
+              </Button>
+            }
+          >
             {error}
           </Alert>
         )}
@@ -562,8 +410,9 @@ const ReportsAnalytics = () => {
                 onClick={fetchAnalyticsData}
                 disabled={loading}
                 fullWidth
+                startIcon={loading ? <CircularProgress size={20} /> : <TrendingUp />}
               >
-                {loading ? <CircularProgress size={24} /> : 'Refresh Data'}
+                {loading ? 'Loading...' : 'Refresh Data'}
               </Button>
             </Grid>
           </Grid>
@@ -571,31 +420,30 @@ const ReportsAnalytics = () => {
 
         {/* Summary Cards */}
         <Grid container spacing={3} sx={{ mb: 3 }}>
-          {Object.entries(summaryData).map(([key, value], index) => (
-            <Grid item xs={12} sm={6} md={3} key={key}>
-              <Card>
-                <CardContent>
-                  <Typography color="textSecondary" gutterBottom variant="overline">
-                    {key.replace(/([A-Z])/g, ' $1').toUpperCase()}
-                  </Typography>
-                  <Typography variant="h5" component="div">
-                    {typeof value === 'object' ? JSON.stringify(value) : value}
-                    {key.includes('Rate') || key.includes('Ratio') ? '%' : ''}
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
+          {getSummaryCards()}
         </Grid>
 
         {/* Chart */}
         <Paper sx={{ p: 3, mb: 3 }} ref={chartRef}>
           <Typography variant="h6" gutterBottom>
             {reportType.charAt(0).toUpperCase() + reportType.slice(1)} Analytics
+            {chartData.length > 0 && (
+              <Chip 
+                label={`${chartData.length} data points`} 
+                size="small" 
+                sx={{ ml: 2 }} 
+                color="primary" 
+                variant="outlined"
+              />
+            )}
           </Typography>
+          
           {loading ? (
             <Box display="flex" justifyContent="center" alignItems="center" height={400}>
               <CircularProgress />
+              <Typography variant="body2" sx={{ ml: 2 }}>
+                Loading analytics data...
+              </Typography>
             </Box>
           ) : (
             renderChart()
@@ -605,36 +453,47 @@ const ReportsAnalytics = () => {
         {/* Data Table */}
         <Paper sx={{ p: 3 }}>
           <Typography variant="h6" gutterBottom>
-            Raw Data
+            Raw Data {chartData.length > 0 && `(${chartData.length} records)`}
           </Typography>
-          <TableContainer>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  {chartData.length > 0 && Object.keys(chartData[0]).map((key) => (
-                    <TableCell key={key}>
-                      {key.charAt(0).toUpperCase() + key.slice(1)}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {chartData.slice(0, 10).map((row, index) => (
-                  <TableRow key={index}>
-                    {Object.values(row).map((value, cellIndex) => (
-                      <TableCell key={cellIndex}>
-                        {typeof value === 'object' ? JSON.stringify(value) : value}
-                      </TableCell>
+          
+          {chartData.length === 0 ? (
+            <Box display="flex" justifyContent="center" alignItems="center" height={100}>
+              <Typography variant="body2" color="textSecondary">
+                No data to display
+              </Typography>
+            </Box>
+          ) : (
+            <>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      {chartData.length > 0 && Object.keys(chartData[0]).map((key) => (
+                        <TableCell key={key} sx={{ fontWeight: 'bold' }}>
+                          {key.charAt(0).toUpperCase() + key.slice(1)}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {chartData.slice(0, 10).map((row, index) => (
+                      <TableRow key={index}>
+                        {Object.values(row).map((value, cellIndex) => (
+                          <TableCell key={cellIndex}>
+                            {typeof value === 'object' ? JSON.stringify(value) : value}
+                          </TableCell>
+                        ))}
+                      </TableRow>
                     ))}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-          {chartData.length > 10 && (
-            <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
-              Showing first 10 of {chartData.length} records
-            </Typography>
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              {chartData.length > 10 && (
+                <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+                  Showing first 10 of {chartData.length} records
+                </Typography>
+              )}
+            </>
           )}
         </Paper>
       </Box>

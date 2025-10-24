@@ -26,17 +26,13 @@ import {
   Alert,
   TextField
 } from '@mui/material';
-import { 
-  DatePicker,
-  LocalizationProvider 
-} from '@mui/x-date-pickers';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import {
   Download,
   PictureAsPdf,
   Analytics,
-  People,
-  Schedule,
   TrendingUp
 } from '@mui/icons-material';
 import jsPDF from 'jspdf';
@@ -53,7 +49,7 @@ const ReportsAnalytics = () => {
   const [reportType, setReportType] = useState('daily');
   const [chartData, setChartData] = useState([]);
   const [summaryData, setSummaryData] = useState({});
-  const [rawData, setRawData] = useState([]);
+  const [rawData, setRawData] = useState({});
 
   const chartRef = useRef();
 
@@ -75,64 +71,34 @@ const ReportsAnalytics = () => {
         reportType
       };
 
-      console.log('🔄 Fetching analytics with params:', params);
+      console.log('🔄 Fetching REAL analytics data with params:', params);
 
-      // Use the new analytics endpoint
+      // Use the analytics endpoint that gets REAL data
       const response = await axios.get('/analytics/reports', { params });
       
       if (response.data.success) {
         setChartData(response.data.chartData || []);
         setSummaryData(response.data.summaryData || {});
-        setRawData(response.data.rawData || []);
+        setRawData(response.data.rawData || {});
         
-        console.log('✅ Analytics data loaded:', {
-          chartData: response.data.chartData?.length,
-          summaryData: response.data.summaryData
+        console.log('✅ REAL Analytics data loaded:', {
+          chartDataPoints: response.data.chartData?.length,
+          summaryData: response.data.summaryData,
+          rawData: response.data.rawData
         });
+
+        // Show message if no data found
+        if (response.data.chartData.length === 0) {
+          setError('No visit logs found in the system for the selected period. Data will appear when visits are logged.');
+        }
       } else {
         throw new Error(response.data.message || 'Failed to fetch analytics');
       }
     } catch (err) {
-      console.error('❌ Error fetching analytics data:', err);
-      
-      // If there's no data, show sample data for demonstration
-      if (err.response?.status === 404 || err.message.includes('No data')) {
-        setError('No visit data found. Showing sample data for demonstration.');
-        loadSampleData();
-      } else {
-        setError('Failed to load analytics data: ' + (err.response?.data?.message || err.message));
-      }
+      console.error('❌ Error fetching REAL analytics data:', err);
+      setError('Failed to load analytics data: ' + (err.response?.data?.message || err.message));
     } finally {
       setLoading(false);
-    }
-  };
-
-  const loadSampleData = async () => {
-    try {
-      const response = await axios.get('/analytics/sample-data');
-      if (response.data.success) {
-        setChartData(response.data.chartData);
-        setSummaryData(response.data.summaryData);
-      }
-    } catch (err) {
-      // Fallback to local sample data
-      const sampleData = [
-        { date: '1/15/2024', visitors: 8, name: '1/15/2024' },
-        { date: '1/16/2024', visitors: 12, name: '1/16/2024' },
-        { date: '1/17/2024', visitors: 15, name: '1/17/2024' },
-        { date: '1/18/2024', visitors: 10, name: '1/18/2024' },
-        { date: '1/19/2024', visitors: 18, name: '1/19/2024' },
-      ];
-
-      const sampleSummary = {
-        totalVisits: 63,
-        avgVisitsPerDay: 13,
-        completionRate: 95,
-        peakDay: '1/19/2024: 18 visits'
-      };
-
-      setChartData(sampleData);
-      setSummaryData(sampleSummary);
     }
   };
 
@@ -210,19 +176,28 @@ const ReportsAnalytics = () => {
 
   // Render appropriate chart based on report type
   const renderChart = () => {
-    console.log('📊 Rendering chart with data:', chartData);
+    console.log('📊 Rendering chart with REAL data:', chartData);
 
     if (!chartData || chartData.length === 0) {
       return (
         <Box display="flex" justifyContent="center" alignItems="center" height={400} flexDirection="column">
           <Typography variant="h6" color="textSecondary" gutterBottom>
-            No Data Available
+            No Visit Data Available
           </Typography>
           <Typography variant="body2" color="textSecondary" align="center">
-            No analytics data found for the selected criteria.
+            No visit logs found in the system for the selected period.
             <br />
-            Try adjusting your date range or check if there are visit logs in the system.
+            Data will appear automatically when visitors and guests start using the system.
           </Typography>
+          <Box sx={{ mt: 2, p: 2, backgroundColor: '#f5f5f5', borderRadius: 1 }}>
+            <Typography variant="caption" color="textSecondary">
+              <strong>System Status:</strong><br />
+              • Visitors: {rawData.visitors || 0}<br />
+              • Guests: {rawData.guests || 0}<br />
+              • Inmates: {rawData.inmates || 0}<br />
+              • Visit Logs: {rawData.visitLogs || 0}
+            </Typography>
+          </Box>
         </Box>
       );
     }
@@ -298,16 +273,16 @@ const ReportsAnalytics = () => {
   };
 
   const getSummaryCards = () => {
-    if (Object.keys(summaryData).length === 0) {
+    if (Object.keys(summaryData).length === 0 || chartData.length === 0) {
       return (
         <Grid item xs={12}>
           <Card>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
-                No Summary Data Available
+                No Analytics Data
               </Typography>
               <Typography variant="body2">
-                No analytics data to display summary statistics.
+                No visit logs found in the system. Analytics will appear when visitors start using the system.
               </Typography>
             </CardContent>
           </Card>
@@ -324,7 +299,6 @@ const ReportsAnalytics = () => {
             </Typography>
             <Typography variant="h5" component="div" sx={{ fontWeight: 'bold' }}>
               {typeof value === 'object' ? JSON.stringify(value) : value}
-              {key.includes('Rate') || key.includes('Ratio') ? '%' : ''}
             </Typography>
           </CardContent>
         </Card>
@@ -352,7 +326,7 @@ const ReportsAnalytics = () => {
 
         {error && (
           <Alert 
-            severity={error.includes('sample data') ? 'info' : 'error'} 
+            severity={error.includes('No visit logs') ? 'info' : 'error'} 
             sx={{ mb: 2 }}
             action={
               <Button 
@@ -360,7 +334,7 @@ const ReportsAnalytics = () => {
                 size="small" 
                 onClick={fetchAnalyticsData}
               >
-                RETRY
+                REFRESH
               </Button>
             }
           >

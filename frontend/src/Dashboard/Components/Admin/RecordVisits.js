@@ -57,6 +57,15 @@ const RecordVisits = () => {
     notes: ''
   });
 
+  // FIXED: Added counts state to prevent recalculating on tab switch
+  const [counts, setCounts] = useState({
+    all: 0,
+    visitors: 0,
+    guests: 0,
+    violators: 0,
+    banned: 0
+  });
+
   const API_BASE = 'http://localhost:5000';
 
   const searchOptions = [
@@ -74,6 +83,7 @@ const RecordVisits = () => {
     'Prohibited Items',
     'Unauthorized Areas',
     'Disruptive Behavior',
+    'Ban',
     'Other'
   ];
 
@@ -98,21 +108,31 @@ const RecordVisits = () => {
     filterLogs();
   }, [visitLogs, startDate, endDate, searchQuery, searchBy, activeTab]);
 
-  // FIXED: Fetch visit logs with guest visit purpose
+  // FIXED: Calculate counts whenever visitLogs, violators, or banned change
+  useEffect(() => {
+    const visitorLogs = visitLogs.filter(log => log.personType === 'visitor');
+    const guestLogs = visitLogs.filter(log => log.personType === 'guest');
+    
+    setCounts({
+      all: visitLogs.length,
+      visitors: visitorLogs.length,
+      guests: guestLogs.length,
+      violators: violators.length,
+      banned: banned.length
+    });
+  }, [visitLogs, violators, banned]);
+
   const fetchVisitLogs = async () => {
     setIsLoading(true);
     try {
       const response = await axios.get(`${API_BASE}/visit-logs`);
       console.log('Raw visit logs:', response.data);
       
-      // Fetch guest details to get visit purpose for guest logs
       const logsWithGuestDetails = await Promise.all(
         response.data.map(async (log) => {
           if (log.personType === 'guest') {
             try {
-              console.log('Fetching guest details for:', log.personId);
               const guestResponse = await axios.get(`${API_BASE}/guests/${log.personId}`);
-              console.log('Guest details:', guestResponse.data);
               return {
                 ...log,
                 visitPurpose: guestResponse.data.visitPurpose || 'General Visit'
@@ -135,7 +155,6 @@ const RecordVisits = () => {
         return dateB - dateA;
       });
       
-      console.log('Final visit logs with guest purposes:', sortedLogs);
       setVisitLogs(sortedLogs);
     } catch (error) {
       console.error("Error fetching visit logs:", error);
@@ -154,7 +173,6 @@ const RecordVisits = () => {
     }
   };
 
-  // FIXED: Fetch violators with guest visit purpose
   const fetchViolators = async () => {
     try {
       const [visitorsRes, guestsRes] = await Promise.all([
@@ -163,7 +181,7 @@ const RecordVisits = () => {
       ]);
       
       const visitorsWithViolations = visitorsRes.data
-        .filter(visitor => visitor.violationType)
+        .filter(visitor => visitor.violationType && visitor.violationType !== 'Ban')
         .map(visitor => ({
           ...visitor,
           personType: 'visitor',
@@ -172,13 +190,12 @@ const RecordVisits = () => {
         }));
       
       const guestsWithViolations = guestsRes.data
-        .filter(guest => guest.violationType)
+        .filter(guest => guest.violationType && guest.violationType !== 'Ban')
         .map(guest => ({
           ...guest,
           personType: 'guest',
           personName: guest.fullName,
-          id: guest.id,
-          visitPurpose: guest.visitPurpose
+          id: guest.id
         }));
       
       const allViolators = [...visitorsWithViolations, ...guestsWithViolations];
@@ -189,7 +206,6 @@ const RecordVisits = () => {
     }
   };
 
-  // FIXED: Fetch banned with guest visit purpose
   const fetchBanned = async () => {
     try {
       const [visitorsRes, guestsRes] = await Promise.all([
@@ -198,22 +214,25 @@ const RecordVisits = () => {
       ]);
       
       const bannedVisitors = visitorsRes.data
-        .filter(visitor => visitor.isBanned)
+        .filter(visitor => visitor.isBanned || visitor.violationType === 'Ban')
         .map(visitor => ({
           ...visitor,
           personType: 'visitor',
           personName: visitor.fullName,
-          id: visitor.id
+          id: visitor.id,
+          banReason: visitor.banReason || visitor.violationDetails || 'Ban violation',
+          banDuration: visitor.banDuration || 'permanent'
         }));
       
       const bannedGuests = guestsRes.data
-        .filter(guest => guest.isBanned)
+        .filter(guest => guest.isBanned || guest.violationType === 'Ban')
         .map(guest => ({
           ...guest,
           personType: 'guest',
           personName: guest.fullName,
           id: guest.id,
-          visitPurpose: guest.visitPurpose
+          banReason: guest.banReason || guest.violationDetails || 'Ban violation',
+          banDuration: guest.banDuration || 'permanent'
         }));
       
       const allBanned = [...bannedVisitors, ...bannedGuests];
@@ -296,6 +315,7 @@ const RecordVisits = () => {
     setShowViolationModal(true);
   };
 
+  // FIXED: Ban modal now opens first without immediate banning
   const openBanModal = (log) => {
     setSelectedLog(log);
     setSelectedPerson(null);
@@ -360,7 +380,6 @@ const RecordVisits = () => {
     }
   };
 
-  // FIXED: Working violation handler with proper error handling
   const handleAddViolation = async () => {
     if (!violationForm.violationType) {
       toast.error("Please select a violation type");
@@ -383,10 +402,28 @@ const RecordVisits = () => {
       const response = await axios.put(endpoint, violationData);
       console.log('✅ Violation response:', response.data);
       
+      // If the violation type is "Ban", also set the ban status
+      if (violationForm.violationType === 'Ban') {
+        const banEndpoint = selectedLog.personType === 'visitor' 
+          ? `${API_BASE}/visitors/${selectedLog.personId}/ban`
+          : `${API_BASE}/guests/${selectedLog.personId}/ban`;
+        
+        const banData = {
+          reason: violationForm.violationDetails || 'Ban violation',
+          duration: '1_week',
+          notes: 'Banned due to violation',
+          isBanned: true
+        };
+        
+        await axios.put(banEndpoint, banData);
+        console.log('✅ Ban status set for Ban violation');
+      }
+      
       toast.success("Violation added successfully");
       setShowViolationModal(false);
       setSelectedLog(null);
       fetchViolators();
+      fetchBanned();
       fetchVisitLogs();
     } catch (error) {
       console.error("❌ Error adding violation:", error);
@@ -412,10 +449,28 @@ const RecordVisits = () => {
       };
       
       await axios.put(endpoint, violationData);
+      
+      // If editing to Ban violation, set ban status
+      if (violationForm.violationType === 'Ban') {
+        const banEndpoint = selectedPerson.personType === 'visitor' 
+          ? `${API_BASE}/visitors/${selectedPerson.id}/ban`
+          : `${API_BASE}/guests/${selectedPerson.id}/ban`;
+        
+        const banData = {
+          reason: violationForm.violationDetails || 'Ban violation',
+          duration: '1_week',
+          notes: 'Banned due to violation',
+          isBanned: true
+        };
+        
+        await axios.put(banEndpoint, banData);
+      }
+      
       toast.success("Violation updated successfully");
       setShowViolationModal(false);
       setSelectedPerson(null);
       fetchViolators();
+      fetchBanned();
     } catch (error) {
       console.error("Error updating violation:", error);
       toast.error("Failed to update violation");
@@ -441,7 +496,7 @@ const RecordVisits = () => {
     }
   };
 
-  // FIXED: Working ban handler with proper error handling
+  // FIXED: Ban handler that only executes when user confirms in modal
   const handleAddBan = async () => {
     if (!banForm.reason) {
       toast.error("Please provide a ban reason");
@@ -449,26 +504,41 @@ const RecordVisits = () => {
     }
 
     try {
-      const endpoint = selectedLog.personType === 'visitor' 
+      // First add Ban as a violation
+      const violationEndpoint = selectedLog.personType === 'visitor' 
+        ? `${API_BASE}/visitors/${selectedLog.personId}/violation`
+        : `${API_BASE}/guests/${selectedLog.personId}/violation`;
+      
+      const violationData = {
+        violationType: 'Ban',
+        violationDetails: banForm.reason
+      };
+      
+      console.log('🔄 Adding Ban violation to:', violationEndpoint);
+      await axios.put(violationEndpoint, violationData);
+      console.log('✅ Ban violation added successfully');
+      
+      // Then set the ban status
+      const banEndpoint = selectedLog.personType === 'visitor' 
         ? `${API_BASE}/visitors/${selectedLog.personId}/ban`
         : `${API_BASE}/guests/${selectedLog.personId}/ban`;
       
       const banData = {
         reason: banForm.reason,
         duration: banForm.duration,
-        notes: banForm.notes
+        notes: banForm.notes,
+        isBanned: true
       };
       
-      console.log('🔄 Adding ban to:', endpoint);
-      console.log('📦 Ban data:', banData);
-      
-      const response = await axios.put(endpoint, banData);
+      console.log('🔄 Setting ban status to:', banEndpoint);
+      const response = await axios.put(banEndpoint, banData);
       console.log('✅ Ban response:', response.data);
       
       toast.success("Person banned successfully");
       setShowBanModal(false);
       setSelectedLog(null);
       fetchBanned();
+      fetchViolators();
       fetchVisitLogs();
     } catch (error) {
       console.error("❌ Error adding ban:", error);
@@ -491,36 +561,101 @@ const RecordVisits = () => {
       const banData = {
         reason: banForm.reason,
         duration: banForm.duration,
-        notes: banForm.notes
+        notes: banForm.notes,
+        isBanned: true
       };
       
       await axios.put(endpoint, banData);
+      
+      // Update the violation as well if it exists
+      const violationEndpoint = selectedPerson.personType === 'visitor' 
+        ? `${API_BASE}/visitors/${selectedPerson.id}/violation`
+        : `${API_BASE}/guests/${selectedPerson.id}/violation`;
+      
+      const violationData = {
+        violationType: 'Ban',
+        violationDetails: banForm.reason
+      };
+      
+      await axios.put(violationEndpoint, violationData);
+      
       toast.success("Ban updated successfully");
       setShowBanModal(false);
       setSelectedPerson(null);
       fetchBanned();
+      fetchViolators();
     } catch (error) {
       console.error("Error updating ban:", error);
       toast.error("Failed to update ban");
     }
   };
 
+  // FIXED: Enhanced remove ban functionality with better error handling
   const handleRemoveBan = async (personId, personType) => {
     if (!window.confirm("Are you sure you want to remove this ban?")) {
       return;
     }
 
     try {
-      const endpoint = personType === 'visitor' 
+      console.log(`🔄 Removing ban for ${personType} with ID: ${personId}`);
+      
+      // Remove the ban status
+      const banEndpoint = personType === 'visitor' 
         ? `${API_BASE}/visitors/${personId}/remove-ban`
         : `${API_BASE}/guests/${personId}/remove-ban`;
       
-      await axios.put(endpoint);
+      console.log(`📤 Calling ban removal endpoint: ${banEndpoint}`);
+      const banResponse = await axios.put(banEndpoint);
+      console.log('✅ Ban removal response:', banResponse.data);
+      
+      // Also remove the Ban violation
+      const violationEndpoint = personType === 'visitor' 
+        ? `${API_BASE}/visitors/${personId}/remove-violation`
+        : `${API_BASE}/guests/${personId}/remove-violation`;
+      
+      console.log(`📤 Calling violation removal endpoint: ${violationEndpoint}`);
+      const violationResponse = await axios.put(violationEndpoint);
+      console.log('✅ Violation removal response:', violationResponse.data);
+      
       toast.success("Ban removed successfully");
+      
+      // Refresh all data
       fetchBanned();
+      fetchViolators();
+      fetchVisitLogs();
+      
     } catch (error) {
-      console.error("Error removing ban:", error);
-      toast.error("Failed to remove ban");
+      console.error("❌ Error removing ban:", error);
+      console.error("📋 Error response:", error.response?.data);
+      console.error("📋 Error status:", error.response?.status);
+      
+      // Try alternative approach if the first one fails
+      try {
+        console.log("🔄 Trying alternative ban removal approach...");
+        
+        // Try to set isBanned to false directly
+        const directEndpoint = personType === 'visitor' 
+          ? `${API_BASE}/visitors/${personId}/ban`
+          : `${API_BASE}/guests/${personId}/ban`;
+        
+        const banData = {
+          reason: 'Ban removed',
+          isBanned: false
+        };
+        
+        console.log(`📤 Calling direct endpoint: ${directEndpoint}`);
+        await axios.put(directEndpoint, banData);
+        console.log('✅ Alternative approach successful');
+        
+        toast.success("Ban removed successfully");
+        fetchBanned();
+        fetchViolators();
+        fetchVisitLogs();
+        
+      } catch (secondError) {
+        console.error("❌ Alternative approach also failed:", secondError);
+        toast.error(`Failed to remove ban: ${error.response?.data?.message || error.message}`);
+      }
     }
   };
 
@@ -596,18 +731,9 @@ const RecordVisits = () => {
     return timeString;
   };
 
-  // Calculate actual counts for visitors and guests from visit logs
-  const getVisitorCount = () => {
-    const visitorLogs = visitLogs.filter(log => log.personType === 'visitor');
-    const uniqueVisitors = new Set(visitorLogs.map(log => log.personId));
-    return uniqueVisitors.size;
-  };
-
-  const getGuestCount = () => {
-    const guestLogs = visitLogs.filter(log => log.personType === 'guest');
-    const uniqueGuests = new Set(guestLogs.map(log => log.personId));
-    return uniqueGuests.size;
-  };
+  // FIXED: Using pre-calculated counts from state
+  const getVisitorCount = () => counts.visitors;
+  const getGuestCount = () => counts.guests;
 
   // FIXED: Properly aligned buttons with consistent styling
   const renderVisitTable = (data) => {
@@ -769,7 +895,6 @@ const RecordVisits = () => {
             <th>Type</th>
             <th>Violation Type</th>
             <th>Violation Details</th>
-            <th>Visit Purpose</th>
             <th style={{ width: '200px' }}>Actions</th>
           </tr>
         </thead>
@@ -787,13 +912,6 @@ const RecordVisits = () => {
                 <Badge bg="danger">{person.violationType}</Badge>
               </td>
               <td>{person.violationDetails || 'No details provided'}</td>
-              <td>
-                {person.personType === 'guest' ? (
-                  <span className="text-primary fw-bold">{person.visitPurpose || 'General Visit'}</span>
-                ) : (
-                  <span className="text-muted">N/A</span>
-                )}
-              </td>
               <td>
                 <div className="d-flex flex-column gap-2 align-items-stretch">
                   <Button
@@ -841,7 +959,6 @@ const RecordVisits = () => {
             <th>Type</th>
             <th>Ban Reason</th>
             <th>Ban Duration</th>
-            <th>Visit Purpose</th>
             <th style={{ width: '200px' }}>Actions</th>
           </tr>
         </thead>
@@ -860,13 +977,6 @@ const RecordVisits = () => {
                 <Badge bg="warning">
                   {person.banDuration ? banDurations.find(d => d.value === person.banDuration)?.label || person.banDuration : 'Permanent'}
                 </Badge>
-              </td>
-              <td>
-                {person.personType === 'guest' ? (
-                  <span className="text-primary fw-bold">{person.visitPurpose || 'General Visit'}</span>
-                ) : (
-                  <span className="text-muted">N/A</span>
-                )}
               </td>
               <td>
                 <div className="d-flex flex-column gap-2 align-items-stretch">
@@ -929,10 +1039,11 @@ const RecordVisits = () => {
             onSelect={(tab) => setActiveTab(tab)}
             className="mb-3"
           >
+            {/* FIXED: Using fixed counts from state that don't change when switching tabs */}
             <Tab eventKey="all" title={
               <span>
                 <Users size={16} className="me-1" />
-                All Visits <Badge bg="primary" className="ms-1">{filteredLogs.length}</Badge>
+                All Visits <Badge bg="primary" className="ms-1">{counts.all}</Badge>
               </span>
             }>
               {/* Filters Card */}
@@ -1025,7 +1136,7 @@ const RecordVisits = () => {
             <Tab eventKey="visitors" title={
               <span>
                 <User size={16} className="me-1" />
-                Visitors <Badge bg="info" className="ms-1">{getVisitorCount()}</Badge>
+                Visitors <Badge bg="info" className="ms-1">{counts.visitors}</Badge>
               </span>
             }>
               {renderVisitTable(filteredLogs)}
@@ -1034,7 +1145,7 @@ const RecordVisits = () => {
             <Tab eventKey="guests" title={
               <span>
                 <Users size={16} className="me-1" />
-                Guests <Badge bg="secondary" className="ms-1">{getGuestCount()}</Badge>
+                Guests <Badge bg="secondary" className="ms-1">{counts.guests}</Badge>
               </span>
             }>
               {renderVisitTable(filteredLogs)}
@@ -1043,7 +1154,7 @@ const RecordVisits = () => {
             <Tab eventKey="violators" title={
               <span>
                 <AlertTriangle size={16} className="me-1" />
-                Violators <Badge bg="danger" className="ms-1">{violators.length}</Badge>
+                Violators <Badge bg="danger" className="ms-1">{counts.violators}</Badge>
               </span>
             }>
               {renderViolatorsTable()}
@@ -1052,7 +1163,7 @@ const RecordVisits = () => {
             <Tab eventKey="banned" title={
               <span>
                 <Slash size={16} className="me-1" />
-                Banned <Badge bg="dark" className="ms-1">{banned.length}</Badge>
+                Banned <Badge bg="dark" className="ms-1">{counts.banned}</Badge>
               </span>
             }>
               {renderBannedTable()}
@@ -1068,7 +1179,7 @@ const RecordVisits = () => {
             <Row>
               <Col md={2} className="text-center">
                 <div className="h4 text-primary mb-1">{filteredLogs.length}</div>
-                <div className="text-muted small">Total Visits</div>
+                <div className="text-muted small">Filtered Visits</div>
               </Col>
               <Col md={2} className="text-center">
                 <div className="h4 text-info mb-1">
@@ -1105,6 +1216,7 @@ const RecordVisits = () => {
         </Card>
       )}
 
+      {/* Rest of the modals remain the same... */}
       {/* View Details Modal */}
       <Modal show={showDetailsModal} onHide={() => setShowDetailsModal(false)} size="lg">
         <Modal.Header closeButton>

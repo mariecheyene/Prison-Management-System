@@ -92,19 +92,20 @@ const PendingRequests = () => {
 
     setIsLoading(true);
     try {
-      // In a real app, you would get the admin user ID from auth context
-      const adminUserId = 'admin-user-id'; // Replace with actual admin user ID
+      // Get admin user ID from your auth context or localStorage
+      const adminUserId = localStorage.getItem('userId') || 'admin-user-id';
 
-      await axios.put(`http://localhost:5000/pending-guests/${selectedGuest.id}/approve`, {
+      const response = await axios.put(`http://localhost:5000/pending-guests/${selectedGuest.id}/approve`, {
         approvedBy: adminUserId
       });
 
-      toast.success('Guest approved successfully!');
+      toast.success('Guest approved successfully! QR code generated.');
       setShowApproveModal(false);
-      fetchPendingGuests();
+      fetchPendingGuests(); // Refresh the list
     } catch (error) {
       console.error('Error approving guest:', error);
-      toast.error('Failed to approve guest');
+      const errorMessage = error.response?.data?.message || 'Failed to approve guest';
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -118,8 +119,7 @@ const PendingRequests = () => {
 
     setIsLoading(true);
     try {
-      // In a real app, you would get the admin user ID from auth context
-      const adminUserId = 'admin-user-id'; // Replace with actual admin user ID
+      const adminUserId = localStorage.getItem('userId') || 'admin-user-id';
 
       await axios.put(`http://localhost:5000/pending-guests/${selectedGuest.id}/reject`, {
         rejectedBy: adminUserId,
@@ -129,10 +129,11 @@ const PendingRequests = () => {
       toast.success('Guest request rejected successfully!');
       setShowRejectModal(false);
       setRejectionReason('');
-      fetchPendingGuests();
+      fetchPendingGuests(); // Refresh the list
     } catch (error) {
       console.error('Error rejecting guest:', error);
-      toast.error('Failed to reject guest');
+      const errorMessage = error.response?.data?.message || 'Failed to reject guest';
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -360,39 +361,17 @@ const PendingRequests = () => {
                   </Card.Body>
                 </Card>
 
-                {selectedGuest.violationType && (
-                  <Card className="mb-3 border-warning">
-                    <Card.Header className="bg-warning text-dark">
-                      <strong>Violation Information</strong>
-                    </Card.Header>
-                    <Card.Body>
-                      <p><strong>Violation Type:</strong> {selectedGuest.violationType}</p>
-                      <p><strong>Violation Details:</strong> {selectedGuest.violationDetails || 'No violation data'}</p>
-                    </Card.Body>
-                  </Card>
-                )}
-
+                {/* QR Code section - Show message for pending guests */}
                 <Card className="mb-3">
                   <Card.Header>
-                    <strong>QR Code</strong>
+                    <strong>QR Code Status</strong>
                   </Card.Header>
                   <Card.Body className="text-center">
-                    {selectedGuest.qrCode ? (
-                      <img 
-                        src={selectedGuest.qrCode} 
-                        alt="Guest QR Code" 
-                        style={{ 
-                          maxWidth: '200px', 
-                          height: 'auto',
-                          border: '1px solid #ddd',
-                          borderRadius: '5px'
-                        }}
-                      />
-                    ) : (
-                      <Alert variant="warning">
-                        QR code not generated.
-                      </Alert>
-                    )}
+                    <Alert variant="info">
+                      <strong>QR Code will be generated after approval</strong>
+                      <br />
+                      <small>Once approved, the guest will receive a unique QR code for entry/exit tracking.</small>
+                    </Alert>
                   </Card.Body>
                 </Card>
               </Col>
@@ -429,7 +408,13 @@ const PendingRequests = () => {
             <strong>Visit Purpose:</strong> {selectedGuest?.visitPurpose}
           </p>
           <p className="text-muted">
-            Once approved, this guest will be added to the main guest list and can use the system.
+            Once approved:
+            <ul>
+              <li>Guest will be added to the main guest list</li>
+              <li>A unique QR code will be generated</li>
+              <li>Guest can now use the QR code for entry/exit</li>
+              <li>Request will be removed from pending list</li>
+            </ul>
           </p>
         </Modal.Body>
         <Modal.Footer>

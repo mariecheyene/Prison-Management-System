@@ -47,7 +47,9 @@ const Guest = () => {
     setIsLoading(true);
     try {
       const response = await axios.get("http://localhost:5000/guests");
-      setGuests(response.data);
+      // Filter only approved guests (not pending ones)
+      const approvedGuests = response.data.filter(guest => guest.status === 'approved' || guest.status === 'completed');
+      setGuests(approvedGuests);
     } catch (error) {
       console.error("Error fetching guests:", error);
       toast.error("Failed to fetch guests");
@@ -230,10 +232,18 @@ const Guest = () => {
   };
 
   const getTimeStatus = (guest) => {
-    if (!guest.hasTimedIn) return { variant: 'secondary', text: 'Not Checked In' };
-    if (guest.hasTimedIn && !guest.hasTimedOut) return { variant: 'success', text: 'Checked In' };
-    if (guest.hasTimedIn && guest.hasTimedOut) return { variant: 'info', text: 'Checked Out' };
-    return { variant: 'secondary', text: 'Unknown' };
+    // Check today's visit status from dailyVisits
+    const today = new Date().toISOString().split('T')[0];
+    const todayVisit = guest.dailyVisits?.find(visit => {
+      if (!visit.visitDate) return false;
+      const visitDate = new Date(visit.visitDate).toISOString().split('T')[0];
+      return visitDate === today;
+    });
+
+    if (!todayVisit) return { variant: 'secondary', text: 'Not Checked In' };
+    if (todayVisit.hasTimedIn && !todayVisit.hasTimedOut) return { variant: 'success', text: 'Checked In' };
+    if (todayVisit.hasTimedIn && todayVisit.hasTimedOut) return { variant: 'info', text: 'Checked Out' };
+    return { variant: 'secondary', text: 'Not Checked In' };
   };
 
   const getViolationVariant = (guest) => {
@@ -393,16 +403,10 @@ const Guest = () => {
               <h3>Time Tracking Information</h3>
               <div class="info-grid">
                 <div class="info-item">
-                  <span class="label">Visit Date:</span> ${selectedGuest.dateVisited ? new Date(selectedGuest.dateVisited).toLocaleDateString() : 'Not yet visited'}
+                  <span class="label">Last Visit Date:</span> ${selectedGuest.lastVisitDate ? new Date(selectedGuest.lastVisitDate).toLocaleDateString() : 'No visits yet'}
                 </div>
                 <div class="info-item">
-                  <span class="label">Time In:</span> ${selectedGuest.timeIn || 'Not recorded'}
-                </div>
-                <div class="info-item">
-                  <span class="label">Time Out:</span> ${selectedGuest.timeOut || 'Not recorded'}
-                </div>
-                <div class="info-item">
-                  <span class="label">Time Status:</span> 
+                  <span class="label">Current Status:</span> 
                   <span class="time-status status-${timeStatus.variant}">${timeStatus.text}</span>
                 </div>
               </div>
@@ -588,9 +592,9 @@ const Guest = () => {
                 <td>{guest.sex}</td>
                 <td>{guest.visitPurpose}</td>
                 <td>
-                  {guest.dateVisited ? (
+                  {guest.lastVisitDate ? (
                     <Badge bg="info">
-                      {formatDate(guest.dateVisited)}
+                      {formatDate(guest.lastVisitDate)}
                     </Badge>
                   ) : (
                     <Badge bg="secondary">Not visited</Badge>
@@ -828,12 +832,12 @@ const Guest = () => {
                   <Card.Body>
                     <Row>
                       <Col md={6}>
-                        <p><strong>Visit Date:</strong> {selectedGuest.dateVisited ? new Date(selectedGuest.dateVisited).toLocaleDateString() : 'Not yet visited'}</p>
-                        <p><strong>Time In:</strong> {selectedGuest.timeIn || 'Not recorded'}</p>
+                        <p><strong>Last Visit Date:</strong> {selectedGuest.lastVisitDate ? new Date(selectedGuest.lastVisitDate).toLocaleDateString() : 'No visits yet'}</p>
+                        <p><strong>Current Status:</strong> <Badge bg={getTimeStatus(selectedGuest).variant}>{getTimeStatus(selectedGuest).text}</Badge></p>
                       </Col>
                       <Col md={6}>
-                        <p><strong>Time Out:</strong> {selectedGuest.timeOut || 'Not recorded'}</p>
-                        <p><strong>Time Status:</strong> <Badge bg={getTimeStatus(selectedGuest).variant}>{getTimeStatus(selectedGuest).text}</Badge></p>
+                        <p><strong>Total Visits:</strong> {selectedGuest.dailyVisits?.length || 0}</p>
+                        <p><strong>Guest Status:</strong> <Badge bg={selectedGuest.status === 'approved' ? 'success' : 'secondary'}>{selectedGuest.status}</Badge></p>
                       </Col>
                     </Row>
                   </Card.Body>
@@ -909,6 +913,7 @@ const Guest = () => {
                   </Card.Header>
                   <Card.Body>
                     <p><strong>Visit Purpose:</strong> {selectedGuest.visitPurpose}</p>
+                    <p><strong>Approval Date:</strong> {selectedGuest.approvedAt ? new Date(selectedGuest.approvedAt).toLocaleDateString() : 'N/A'}</p>
                   </Card.Body>
                 </Card>
 

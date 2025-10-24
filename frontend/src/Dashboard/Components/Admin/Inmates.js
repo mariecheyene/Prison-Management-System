@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Container, Row, Col, Table, Button, Modal, Form, 
-  Alert, Badge, Spinner, InputGroup, Card, ButtonGroup 
+  Alert, Badge, Spinner, InputGroup, Card, ButtonGroup,
+  ListGroup
 } from 'react-bootstrap';
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -17,13 +18,15 @@ import {
   Printer,
   ChevronLeft,
   ChevronRight,
-  User
+  User,
+  X
 } from 'react-feather';
 
 const Inmates = ({ gender = 'all' }) => {
   const [inmates, setInmates] = useState([]);
   const [filteredInmates, setFilteredInmates] = useState([]);
   const [crimes, setCrimes] = useState([]);
+  const [filteredCrimes, setFilteredCrimes] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -41,6 +44,8 @@ const Inmates = ({ gender = 'all' }) => {
   });
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [selectedGender, setSelectedGender] = useState(gender);
+  const [crimeSearch, setCrimeSearch] = useState('');
+  const [showCrimeDropdown, setShowCrimeDropdown] = useState(false);
 
   const searchOptions = [
     { value: 'lastName', label: 'Last Name' },
@@ -59,6 +64,19 @@ const Inmates = ({ gender = 'all' }) => {
   useEffect(() => {
     filterInmates();
   }, [searchQuery, searchBy, inmates, selectedGender]);
+
+  useEffect(() => {
+    // Filter crimes based on search input
+    if (crimeSearch.trim() === '') {
+      setFilteredCrimes(crimes.filter(crime => crime.status === 'active').slice(0, 10)); // Show first 10 when empty
+    } else {
+      const filtered = crimes.filter(crime => 
+        crime.status === 'active' && 
+        crime.crime.toLowerCase().includes(crimeSearch.toLowerCase())
+      );
+      setFilteredCrimes(filtered.slice(0, 10)); // Limit to 10 results
+    }
+  }, [crimeSearch, crimes]);
 
   const fetchInmates = async () => {
     setIsLoading(true);
@@ -135,6 +153,8 @@ const Inmates = ({ gender = 'all' }) => {
       leftImage: null,
       rightImage: null
     });
+    setCrimeSearch('');
+    setShowCrimeDropdown(false);
     setShowModal(true);
   };
 
@@ -147,6 +167,8 @@ const Inmates = ({ gender = 'all' }) => {
       dateTo: inmate.dateTo ? inmate.dateTo.split('T')[0] : ''
     };
     setFormData(formattedInmate);
+    setCrimeSearch(inmate.crime || '');
+    setShowCrimeDropdown(false);
     setShowModal(true);
   };
 
@@ -204,6 +226,34 @@ const Inmates = ({ gender = 'all' }) => {
     }));
   };
 
+  const handleCrimeSearchChange = (e) => {
+    const value = e.target.value;
+    setCrimeSearch(value);
+    setFormData(prev => ({
+      ...prev,
+      crime: value
+    }));
+    setShowCrimeDropdown(true);
+  };
+
+  const handleCrimeSelect = (crimeName) => {
+    setFormData(prev => ({
+      ...prev,
+      crime: crimeName
+    }));
+    setCrimeSearch(crimeName);
+    setShowCrimeDropdown(false);
+  };
+
+  const clearCrimeSelection = () => {
+    setFormData(prev => ({
+      ...prev,
+      crime: ''
+    }));
+    setCrimeSearch('');
+    setShowCrimeDropdown(false);
+  };
+
   const handleImageChange = (e, imageType) => {
     const file = e.target.files[0];
     setImageFiles(prev => ({
@@ -212,88 +262,88 @@ const Inmates = ({ gender = 'all' }) => {
     }));
   };
 
- const handleSubmit = async (e) => {
-  e.preventDefault();
-  setIsLoading(true);
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
 
-  // Validate required fields
-  if (!formData.lastName || !formData.firstName || !formData.sex || !formData.dateOfBirth || !formData.address || !formData.cellId || !formData.crime) {
-    toast.error('Please fill in all required fields');
-    setIsLoading(false);
-    return;
-  }
-
-  try {
-    const submitData = new FormData();
-    
-    // Format dates properly and handle empty values
-    const formattedData = {
-      ...formData,
-      // Ensure empty strings for optional fields
-      middleName: formData.middleName || '',
-      extension: formData.extension || '',
-      maritalStatus: formData.maritalStatus || '',
-      eyeColor: formData.eyeColor || '',
-      complexion: formData.complexion || '',
-      sentence: formData.sentence || '',
-      emergencyName: formData.emergencyName || '',
-      emergencyContact: formData.emergencyContact || '',
-      emergencyRelation: formData.emergencyRelation || '',
-      // Handle date fields - set to null if empty
-      dateFrom: formData.dateFrom || null,
-      dateTo: formData.dateTo || null,
-    };
-
-    // Append all form data
-    Object.keys(formattedData).forEach(key => {
-      if (formattedData[key] !== null && formattedData[key] !== undefined) {
-        submitData.append(key, formattedData[key]);
-      }
-    });
-
-    // Append image files
-    Object.keys(imageFiles).forEach(key => {
-      if (imageFiles[key]) {
-        submitData.append(key, imageFiles[key]);
-      }
-    });
-
-    console.log("📤 Submitting inmate data...");
-
-    let response;
-    if (editingInmate) {
-      response = await axios.put(`http://localhost:5000/inmates/${editingInmate.inmateCode}`, submitData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
-      toast.success('Inmate updated successfully!');
-    } else {
-      response = await axios.post("http://localhost:5000/inmates", submitData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
-      toast.success('Inmate created successfully!');
+    // Validate required fields
+    if (!formData.lastName || !formData.firstName || !formData.sex || !formData.dateOfBirth || !formData.address || !formData.cellId || !formData.crime) {
+      toast.error('Please fill in all required fields');
+      setIsLoading(false);
+      return;
     }
-    
-    setShowModal(false);
-    resetForm();
-    fetchInmates();
-  } catch (error) {
-    console.error('Error submitting inmate:', error);
-    console.error('Error response:', error.response?.data);
-    
-    // Show more detailed error message
-    const errorMessage = error.response?.data?.message || 
-                        error.response?.data?.error || 
-                        `Failed to ${editingInmate ? 'update' : 'create'} inmate`;
-    
-    toast.error(errorMessage);
-  } finally {
-    setIsLoading(false);
-  }
-};
+
+    try {
+      const submitData = new FormData();
+      
+      // Format dates properly and handle empty values
+      const formattedData = {
+        ...formData,
+        // Ensure empty strings for optional fields
+        middleName: formData.middleName || '',
+        extension: formData.extension || '',
+        maritalStatus: formData.maritalStatus || '',
+        eyeColor: formData.eyeColor || '',
+        complexion: formData.complexion || '',
+        sentence: formData.sentence || '',
+        emergencyName: formData.emergencyName || '',
+        emergencyContact: formData.emergencyContact || '',
+        emergencyRelation: formData.emergencyRelation || '',
+        // Handle date fields - set to null if empty
+        dateFrom: formData.dateFrom || null,
+        dateTo: formData.dateTo || null,
+      };
+
+      // Append all form data
+      Object.keys(formattedData).forEach(key => {
+        if (formattedData[key] !== null && formattedData[key] !== undefined) {
+          submitData.append(key, formattedData[key]);
+        }
+      });
+
+      // Append image files
+      Object.keys(imageFiles).forEach(key => {
+        if (imageFiles[key]) {
+          submitData.append(key, imageFiles[key]);
+        }
+      });
+
+      console.log("📤 Submitting inmate data...");
+
+      let response;
+      if (editingInmate) {
+        response = await axios.put(`http://localhost:5000/inmates/${editingInmate.inmateCode}`, submitData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+        toast.success('Inmate updated successfully!');
+      } else {
+        response = await axios.post("http://localhost:5000/inmates", submitData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+        toast.success('Inmate created successfully!');
+      }
+      
+      setShowModal(false);
+      resetForm();
+      fetchInmates();
+    } catch (error) {
+      console.error('Error submitting inmate:', error);
+      console.error('Error response:', error.response?.data);
+      
+      // Show more detailed error message
+      const errorMessage = error.response?.data?.message || 
+                          error.response?.data?.error || 
+                          `Failed to ${editingInmate ? 'update' : 'create'} inmate`;
+      
+      toast.error(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleFileUpload = (e) => {
     setCsvFile(e.target.files[0]);
@@ -401,6 +451,8 @@ const Inmates = ({ gender = 'all' }) => {
       leftImage: null,
       rightImage: null
     });
+    setCrimeSearch('');
+    setShowCrimeDropdown(false);
   };
 
   const getGenderTitle = () => {
@@ -963,19 +1015,52 @@ const Inmates = ({ gender = 'all' }) => {
               <Col md={6}>
                 <Form.Group className="mb-3">
                   <Form.Label>Crime *</Form.Label>
-                  <Form.Select
-                    name="crime"
-                    value={formData.crime}
-                    onChange={handleInputChange}
-                    required
-                  >
-                    <option value="">Select Crime</option>
-                    {crimes.filter(crime => crime.status === 'active').map(crime => (
-                      <option key={crime._id} value={crime.crime}>
-                        {crime.crime}
-                      </option>
-                    ))}
-                  </Form.Select>
+                  <div className="position-relative">
+                    <InputGroup>
+                      <Form.Control
+                        type="text"
+                        value={crimeSearch}
+                        onChange={handleCrimeSearchChange}
+                        onFocus={() => setShowCrimeDropdown(true)}
+                        placeholder="Type to search crimes..."
+                        required
+                      />
+                      {crimeSearch && (
+                        <Button
+                          variant="outline-secondary"
+                          onClick={clearCrimeSelection}
+                        >
+                          <X size={16} />
+                        </Button>
+                      )}
+                    </InputGroup>
+                    
+                    {/* Crime Dropdown */}
+                    {showCrimeDropdown && filteredCrimes.length > 0 && (
+                      <ListGroup className="position-absolute w-100 mt-1" style={{ zIndex: 1050, maxHeight: '200px', overflowY: 'auto' }}>
+                        {filteredCrimes.map(crime => (
+                          <ListGroup.Item
+                            key={crime._id}
+                            action
+                            onClick={() => handleCrimeSelect(crime.crime)}
+                            className="small"
+                          >
+                            {crime.crime}
+                          </ListGroup.Item>
+                        ))}
+                      </ListGroup>
+                    )}
+                    
+                    {/* No results message */}
+                    {showCrimeDropdown && crimeSearch.trim() !== '' && filteredCrimes.length === 0 && (
+                      <div className="position-absolute w-100 mt-1 border bg-white p-2 small text-muted" style={{ zIndex: 1050 }}>
+                        No crimes found matching "{crimeSearch}"
+                      </div>
+                    )}
+                  </div>
+                  <Form.Text className="text-muted">
+                    Start typing to search from available crimes
+                  </Form.Text>
                 </Form.Group>
               </Col>
             </Row>

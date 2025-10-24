@@ -12,7 +12,8 @@ import {
   Statistic,
   Progress,
   Modal,
-  Alert
+  Alert,
+  Tooltip
 } from 'antd';
 import { 
   DownloadOutlined, 
@@ -21,7 +22,10 @@ import {
   DeleteOutlined,
   EyeOutlined,
   SecurityScanOutlined,
-  RocketOutlined
+  RocketOutlined,
+  ClearOutlined,
+  FileZipOutlined,
+  FileTextOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
 
@@ -34,10 +38,11 @@ const Maintenance = () => {
   const [health, setHealth] = useState({});
   const [restoreModalVisible, setRestoreModalVisible] = useState(false);
   const [selectedBackup, setSelectedBackup] = useState(null);
+  const [cleanupLoading, setCleanupLoading] = useState(false);
 
   const API_BASE_URL = 'http://localhost:5000';
 
-  // Fetch all backups
+  // Fetch all backups and stats
   const fetchBackups = async () => {
     setLoading(true);
     try {
@@ -46,9 +51,11 @@ const Maintenance = () => {
       setStats(response.data.stats || {});
     } catch (error) {
       console.error('Fetch backups error:', error);
-      message.warning('Backup system not initialized or no backups found');
-      setBackups([]);
-      setStats({});
+      if (error.response?.status === 404) {
+        message.warning('Backup system initializing...');
+      } else {
+        message.error('Failed to fetch backups');
+      }
     } finally {
       setLoading(false);
     }
@@ -59,7 +66,13 @@ const Maintenance = () => {
     setExportLoading(true);
     try {
       const response = await axios.post(`${API_BASE_URL}/backups/create`, { format });
-      message.success(response.data.message);
+      
+      if (format === 'csv') {
+        message.success('CSV backup created successfully! Downloading ZIP file...');
+      } else {
+        message.success(response.data.message);
+      }
+      
       fetchBackups();
       
       // Auto-download the backup file
@@ -71,6 +84,10 @@ const Maintenance = () => {
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
+          
+          if (format === 'csv') {
+            message.info('CSV files are packaged in a ZIP file for download');
+          }
         }, 1000);
       }
     } catch (error) {
@@ -94,26 +111,56 @@ const Maintenance = () => {
     }
   };
 
+  // Auto backup
+  const createAutoBackup = async () => {
+    try {
+      const response = await axios.post(`${API_BASE_URL}/backups/auto`);
+      message.success(response.data.message);
+      if (response.data.cleanup?.deleted > 0) {
+        message.info(`Cleaned up ${response.data.cleanup.deleted} old backups`);
+      }
+      fetchBackups();
+    } catch (error) {
+      message.error('Auto backup failed');
+      console.error('Auto backup error:', error);
+    }
+  };
+
   // Download backup
   const downloadBackup = (filename) => {
-    const link = document.createElement('a');
-    link.href = `${API_BASE_URL}/backups/download/${filename}`;
-    link.setAttribute('download', filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+      const link = document.createElement('a');
+      link.href = `${API_BASE_URL}/backups/download/${filename}`;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      message.success(`Downloading ${filename}`);
+    } catch (error) {
+      message.error('Download failed');
+      console.error('Download error:', error);
+    }
   };
 
   // Delete backup
   const deleteBackup = async (filename) => {
-    try {
-      await axios.delete(`${API_BASE_URL}/backups/${filename}`);
-      message.success('Backup deleted successfully');
-      fetchBackups();
-    } catch (error) {
-      message.error('Failed to delete backup');
-      console.error('Delete backup error:', error);
-    }
+    Modal.confirm({
+      title: 'Confirm Delete',
+      content: `Are you sure you want to delete backup "${filename}"? This action cannot be undone.`,
+      okText: 'Yes, Delete',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          await axios.delete(`${API_BASE_URL}/backups/${filename}`);
+          message.success('Backup deleted successfully');
+          fetchBackups();
+        } catch (error) {
+          message.error('Failed to delete backup');
+          console.error('Delete backup error:', error);
+        }
+      }
+    });
   };
 
   // Restore backup
@@ -126,11 +173,17 @@ const Maintenance = () => {
       
       // Show restore results
       if (response.data.results) {
-        const { restored, errors } = response.data.results;
+        const { restored, errors, totalRestored } = response.data.results;
         const successCount = Object.keys(restored).length;
         const errorCount = Object.keys(errors).length;
         
-        message.info(`Restored ${successCount} collections, ${errorCount} errors`);
+        if (totalRestored > 0) {
+          message.success(`Successfully restored ${totalRestored} records across ${successCount} collections`);
+        }
+        
+        if (errorCount > 0) {
+          message.warning(`${errorCount} collections had errors during restore`);
+        }
       }
     } catch (error) {
       const errorMsg = error.response?.data?.message || 'Restore failed';
@@ -143,7 +196,12 @@ const Maintenance = () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/health`);
       setHealth(response.data);
-      message.success('System is healthy');
+      
+      if (response.data.status === 'healthy') {
+        message.success('System is healthy and running smoothly');
+      } else {
+        message.warning('System has some issues - check the health status');
+      }
     } catch (error) {
       message.error('System health check failed');
       console.error('Health check error:', error);
@@ -162,25 +220,78 @@ const Maintenance = () => {
     }
   };
 
+  // Cleanup old backups
+  const cleanupBackups = async () => {
+    Modal.confirm({
+      title: 'Cleanup Old Backups',
+      content: 'This will delete all backups except the 10 most recent ones. Continue?',
+      okText: 'Yes, Cleanup',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        setCleanupLoading(true);
+        try {
+          const response = await axios.post(`${API_BASE_URL}/backups/cleanup`, { keepLast: 10 });
+          message.success(`Cleanup completed: ${response.data.deleted} backups deleted`);
+          fetchBackups();
+        } catch (error) {
+          message.error('Cleanup failed');
+          console.error('Cleanup error:', error);
+        } finally {
+          setCleanupLoading(false);
+        }
+      }
+    });
+  };
+
+  // Format file size
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '0 B';
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+  };
+
+  // Format date
+  const formatDate = (dateString) => {
+    return new Date(dateString).toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
   const columns = [
     {
       title: 'Filename',
       dataIndex: 'filename',
       key: 'filename',
-      render: (text) => <span style={{ fontFamily: 'monospace', fontSize: '12px' }}>{text}</span>
+      render: (text, record) => (
+        <Space>
+          {record.format === 'json' ? <FileTextOutlined /> : <FileZipOutlined />}
+          <span style={{ fontFamily: 'monospace', fontSize: '12px' }}>{text}</span>
+        </Space>
+      )
     },
     {
       title: 'Date Created',
       dataIndex: 'createdAt',
       key: 'createdAt',
-      render: (date) => new Date(date).toLocaleString()
+      render: (date) => formatDate(date),
+      sorter: (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
+      defaultSortOrder: 'descend'
     },
     {
       title: 'Format',
       dataIndex: 'format',
       key: 'format',
       render: (format) => (
-        <Tag color={format === 'json' ? 'blue' : 'green'}>
+        <Tag 
+          color={format === 'json' ? 'blue' : 'green'}
+          icon={format === 'json' ? <FileTextOutlined /> : <FileZipOutlined />}
+        >
           {format?.toUpperCase()}
         </Tag>
       )
@@ -189,47 +300,71 @@ const Maintenance = () => {
       title: 'Size',
       dataIndex: 'size',
       key: 'size',
-      render: (size) => {
-        if (!size) return '-';
-        const sizeInKB = size / 1024;
-        if (sizeInKB > 1024) {
-          return `${(sizeInKB / 1024).toFixed(2)} MB`;
-        }
-        return `${sizeInKB.toFixed(2)} KB`;
-      }
+      render: (size) => formatFileSize(size),
+      sorter: (a, b) => a.size - b.size
+    },
+    {
+      title: 'Type',
+      dataIndex: 'type',
+      key: 'type',
+      render: (type) => (
+        <Tag 
+          color={
+            type === 'quick' ? 'green' : 
+            type === 'auto' ? 'orange' : 
+            type === 'manual' ? 'blue' : 'default'
+          }
+        >
+          {type?.charAt(0).toUpperCase() + type?.slice(1)}
+        </Tag>
+      ),
+      filters: [
+        { text: 'Manual', value: 'manual' },
+        { text: 'Quick', value: 'quick' },
+        { text: 'Auto', value: 'auto' }
+      ],
+      onFilter: (value, record) => record.type === value
     },
     {
       title: 'Actions',
       key: 'actions',
+      width: 250,
       render: (_, record) => (
         <Space>
-          <Button 
-            icon={<DownloadOutlined />} 
-            onClick={() => downloadBackup(record.filename)}
-            size="small"
-          >
-            Download
-          </Button>
-          <Button 
-            icon={<EyeOutlined />}
-            onClick={() => {
-              setSelectedBackup(record);
-              setRestoreModalVisible(true);
-            }}
-            size="small"
-            type="dashed"
-            danger
-          >
-            Restore
-          </Button>
-          <Button 
-            icon={<DeleteOutlined />}
-            onClick={() => deleteBackup(record.filename)}
-            size="small"
-            danger
-          >
-            Delete
-          </Button>
+          <Tooltip title="Download Backup">
+            <Button 
+              icon={<DownloadOutlined />} 
+              onClick={() => downloadBackup(record.filename)}
+              size="small"
+            >
+              Download
+            </Button>
+          </Tooltip>
+          
+          <Tooltip title="Restore from this backup">
+            <Button 
+              icon={<EyeOutlined />}
+              onClick={() => {
+                setSelectedBackup(record);
+                setRestoreModalVisible(true);
+              }}
+              size="small"
+              type="dashed"
+            >
+              Restore
+            </Button>
+          </Tooltip>
+          
+          <Tooltip title="Delete Backup">
+            <Button 
+              icon={<DeleteOutlined />}
+              onClick={() => deleteBackup(record.filename)}
+              size="small"
+              danger
+            >
+              Delete
+            </Button>
+          </Tooltip>
         </Space>
       ),
     },
@@ -239,6 +374,13 @@ const Maintenance = () => {
     fetchBackups();
     getDatabaseStats();
     runHealthCheck();
+    
+    // Refresh stats every 30 seconds
+    const interval = setInterval(() => {
+      getDatabaseStats();
+    }, 30000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   return (
@@ -246,31 +388,47 @@ const Maintenance = () => {
       <Row gutter={[16, 16]}>
         {/* System Health */}
         <Col span={24}>
-          <Card title="System Health" size="small">
+          <Card 
+            title={
+              <Space>
+                <SecurityScanOutlined />
+                System Health
+                <Tag color={health.status === 'healthy' ? 'green' : 'red'}>
+                  {health.status ? health.status.toUpperCase() : 'UNKNOWN'}
+                </Tag>
+              </Space>
+            } 
+            size="small"
+          >
             <Row gutter={16}>
               <Col span={6}>
                 <Statistic
-                  title="Database"
+                  title="Database Status"
                   value={health.database === 'connected' ? 'Connected' : 'Disconnected'}
-                  valueStyle={{ color: health.database === 'connected' ? '#3f8600' : '#cf1322' }}
+                  valueStyle={{ 
+                    color: health.database === 'connected' ? '#3f8600' : '#cf1322',
+                    fontSize: '16px'
+                  }}
                 />
               </Col>
               <Col span={6}>
                 <Statistic
-                  title="Uptime"
-                  value={health.uptime ? `${Math.floor(health.uptime / 60)}m` : 'Unknown'}
+                  title="Server Uptime"
+                  value={health.uptime ? `${Math.floor(health.uptime / 3600)}h ${Math.floor((health.uptime % 3600) / 60)}m` : 'Unknown'}
                 />
               </Col>
               <Col span={6}>
                 <Statistic
-                  title="Backups"
-                  value={health.backups?.count || 0}
+                  title="Active Timers"
+                  value={health.active?.timers || 0}
+                  suffix={`/ ${health.active?.users || 0} users`}
                 />
               </Col>
               <Col span={6}>
                 <Statistic
-                  title="Memory"
+                  title="Memory Usage"
                   value={health.memory?.used || 'Unknown'}
+                  suffix={health.memory?.heapUsed ? `(${health.memory.heapUsed})` : ''}
                 />
               </Col>
             </Row>
@@ -284,8 +442,9 @@ const Maintenance = () => {
               <Card>
                 <Statistic
                   title="Total Backups"
-                  value={stats.totalBackups || 0}
+                  value={backups.length}
                   prefix={<DatabaseOutlined />}
+                  valueStyle={{ color: backups.length > 0 ? '#3f8600' : '#cf1322' }}
                 />
               </Card>
             </Col>
@@ -294,6 +453,7 @@ const Maintenance = () => {
                 <Statistic
                   title="Database Collections"
                   value={stats.collectionsCount || 0}
+                  suffix="collections"
                 />
               </Card>
             </Col>
@@ -302,6 +462,7 @@ const Maintenance = () => {
                 <Statistic
                   title="Total Records"
                   value={stats.totalRecords || 0}
+                  suffix="records"
                 />
               </Card>
             </Col>
@@ -309,7 +470,8 @@ const Maintenance = () => {
               <Card>
                 <Statistic
                   title="Last Backup"
-                  value={stats.lastBackup ? new Date(stats.lastBackup).toLocaleDateString() : 'Never'}
+                  value={stats.lastBackup ? formatDate(stats.lastBackup) : 'Never'}
+                  valueStyle={{ fontSize: '14px' }}
                 />
               </Card>
             </Col>
@@ -319,22 +481,46 @@ const Maintenance = () => {
         {/* Backup Actions */}
         <Col span={24}>
           <Card 
-            title="Database Maintenance" 
+            title={
+              <Space>
+                <DatabaseOutlined />
+                Database Maintenance
+                <Tag color="blue">LIVE</Tag>
+              </Space>
+            } 
             bordered={false}
             extra={
-              <Space>
-                <Button 
-                  icon={<SecurityScanOutlined />}
-                  onClick={runHealthCheck}
-                >
-                  Health Check
-                </Button>
-                <Button 
-                  icon={<RocketOutlined />}
-                  onClick={createQuickBackup}
-                >
-                  Quick Backup
-                </Button>
+              <Space wrap>
+                <Tooltip title="Check System Health">
+                  <Button 
+                    icon={<SecurityScanOutlined />}
+                    onClick={runHealthCheck}
+                  >
+                    Health Check
+                  </Button>
+                </Tooltip>
+                
+                <Tooltip title="Keep only 10 most recent backups">
+                  <Button 
+                    icon={<ClearOutlined />}
+                    onClick={cleanupBackups}
+                    loading={cleanupLoading}
+                    danger
+                    disabled={backups.length <= 10}
+                  >
+                    Cleanup
+                  </Button>
+                </Tooltip>
+                
+                <Tooltip title="Create quick backup (essential data only)">
+                  <Button 
+                    icon={<RocketOutlined />}
+                    onClick={createQuickBackup}
+                  >
+                    Quick Backup
+                  </Button>
+                </Tooltip>
+                
                 <Button 
                   icon={<SyncOutlined />} 
                   onClick={fetchBackups}
@@ -349,22 +535,51 @@ const Maintenance = () => {
               <Space wrap>
                 <Select
                   value={format}
-                  style={{ width: 120 }}
+                  style={{ width: 140 }}
                   onChange={setFormat}
                   options={[
-                    { value: 'json', label: 'JSON' },
-                    { value: 'csv', label: 'CSV' },
+                    { 
+                      value: 'json', 
+                      label: (
+                        <Space>
+                          <FileTextOutlined />
+                          JSON Format
+                        </Space>
+                      ) 
+                    },
+                    { 
+                      value: 'csv', 
+                      label: (
+                        <Space>
+                          <FileZipOutlined />
+                          CSV Format (ZIP)
+                        </Space>
+                      ) 
+                    },
                   ]}
                 />
-                <Button 
-                  type="primary" 
-                  onClick={createBackup}
-                  loading={exportLoading}
-                  icon={<DownloadOutlined />}
-                  size="large"
-                >
-                  Create Backup
-                </Button>
+                
+                <Tooltip title={`Create full ${format.toUpperCase()} backup of all data`}>
+                  <Button 
+                    type="primary" 
+                    onClick={createBackup}
+                    loading={exportLoading}
+                    icon={<DownloadOutlined />}
+                    size="large"
+                  >
+                    Create {format.toUpperCase()} Backup
+                  </Button>
+                </Tooltip>
+                
+                <Tooltip title="Create automated backup with cleanup">
+                  <Button 
+                    onClick={createAutoBackup}
+                    icon={<RocketOutlined />}
+                  >
+                    Auto Backup
+                  </Button>
+                </Tooltip>
+                
                 <Button 
                   onClick={getDatabaseStats}
                   icon={<DatabaseOutlined />}
@@ -375,14 +590,25 @@ const Maintenance = () => {
 
               {/* Storage Usage */}
               {stats.storageUsage && (
-                <div style={{ marginTop: 16 }}>
+                <div style={{ marginTop: 16, maxWidth: 400 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <span>Storage Usage</span>
+                    <span>
+                      <DatabaseOutlined /> Storage Usage
+                      {stats.totalRecords && (
+                        <span style={{ color: '#666', fontSize: '12px', marginLeft: 8 }}>
+                          ({stats.totalRecords.toLocaleString()} records)
+                        </span>
+                      )}
+                    </span>
                     <span>{Math.round(stats.storageUsage)}%</span>
                   </div>
                   <Progress 
                     percent={stats.storageUsage} 
-                    status={stats.storageUsage > 80 ? 'exception' : 'normal'}
+                    status={stats.storageUsage > 90 ? 'exception' : stats.storageUsage > 80 ? 'active' : 'normal'}
+                    strokeColor={{
+                      '0%': '#108ee9',
+                      '100%': '#87d068',
+                    }}
                   />
                 </div>
               )}
@@ -396,12 +622,15 @@ const Maintenance = () => {
             <Card title="Collection Statistics" size="small">
               <Row gutter={[16, 16]}>
                 {Object.entries(stats.collectionStats).map(([name, count]) => (
-                  <Col span={6} key={name}>
-                    <Card size="small">
+                  <Col xs={12} sm={8} md={6} lg={4} key={name}>
+                    <Card size="small" hoverable>
                       <Statistic
                         title={name}
                         value={count}
-                        valueStyle={{ fontSize: '16px' }}
+                        valueStyle={{ 
+                          fontSize: '16px',
+                          color: count > 0 ? '#1890ff' : '#999'
+                        }}
                       />
                     </Card>
                   </Col>
@@ -413,16 +642,44 @@ const Maintenance = () => {
 
         {/* Backups Table */}
         <Col span={24}>
-          <Card title="Backup Files">
+          <Card 
+            title={
+              <Space>
+                <DownloadOutlined />
+                Backup Files
+                <Tag>{backups.length} backups</Tag>
+              </Space>
+            }
+            extra={
+              <Space>
+                <span style={{ color: '#666', fontSize: '12px' }}>
+                  Total size: {formatFileSize(backups.reduce((sum, backup) => sum + (backup.size || 0), 0))}
+                </span>
+              </Space>
+            }
+          >
             <Table
               columns={columns}
               dataSource={backups}
               loading={loading}
               rowKey="filename"
-              pagination={{ pageSize: 10 }}
+              pagination={{ 
+                pageSize: 10,
+                showSizeChanger: true,
+                showQuickJumper: true,
+                showTotal: (total, range) => 
+                  `${range[0]}-${range[1]} of ${total} backups`
+              }}
               scroll={{ x: 800 }}
               locale={{
-                emptyText: backups.length === 0 && !loading ? 'No backups found. Create your first backup!' : 'No data'
+                emptyText: (
+                  <div style={{ padding: '40px 0', textAlign: 'center' }}>
+                    <DatabaseOutlined style={{ fontSize: 48, color: '#ddd', marginBottom: 16 }} />
+                    <div style={{ color: '#999' }}>
+                      No backups found. Create your first backup to get started!
+                    </div>
+                  </div>
+                )
               }}
             />
           </Card>
@@ -431,7 +688,12 @@ const Maintenance = () => {
 
       {/* Restore Confirmation Modal */}
       <Modal
-        title="⚠️ Confirm Database Restore"
+        title={
+          <Space>
+            <EyeOutlined />
+            Confirm Database Restore
+          </Space>
+        }
         open={restoreModalVisible}
         onCancel={() => {
           setRestoreModalVisible(false);
@@ -446,28 +708,62 @@ const Maintenance = () => {
             type="primary" 
             danger 
             onClick={() => selectedBackup && restoreBackup(selectedBackup.filename)}
+            icon={<EyeOutlined />}
           >
             I Understand - Restore Now
           </Button>,
         ]}
+        width={600}
       >
         <Alert
-          message="Critical Warning"
-          description="This action will REPLACE ALL CURRENT DATA with the backup data. This cannot be undone!"
+          message="Critical Warning - Data Loss Risk"
+          description="This action will COMPLETELY REPLACE ALL CURRENT DATA with the backup data. All existing records will be permanently lost!"
           type="error"
           showIcon
           style={{ marginBottom: 16 }}
         />
         
-        <div style={{ padding: '10px 0' }}>
-          <p><strong>Backup File:</strong> {selectedBackup?.filename}</p>
-          <p><strong>Date:</strong> {selectedBackup && new Date(selectedBackup.createdAt).toLocaleString()}</p>
-          <p><strong>Size:</strong> {selectedBackup?.size ? `${(selectedBackup.size / 1024 / 1024).toFixed(2)} MB` : 'Unknown'}</p>
-        </div>
+        <Card size="small" title="Backup Details" style={{ marginBottom: 16 }}>
+          <Row gutter={16}>
+            <Col span={12}>
+              <strong>File:</strong>
+              <div style={{ fontFamily: 'monospace', fontSize: '12px' }}>
+                {selectedBackup?.filename}
+              </div>
+            </Col>
+            <Col span={12}>
+              <strong>Created:</strong>
+              <div>{selectedBackup && formatDate(selectedBackup.createdAt)}</div>
+            </Col>
+          </Row>
+          <Row gutter={16} style={{ marginTop: 8 }}>
+            <Col span={12}>
+              <strong>Size:</strong>
+              <div>{selectedBackup?.size ? formatFileSize(selectedBackup.size) : 'Unknown'}</div>
+            </Col>
+            <Col span={12}>
+              <strong>Type:</strong>
+              <div>
+                <Tag color={
+                  selectedBackup?.type === 'quick' ? 'green' : 
+                  selectedBackup?.type === 'auto' ? 'orange' : 'blue'
+                }>
+                  {selectedBackup?.type}
+                </Tag>
+              </div>
+            </Col>
+          </Row>
+        </Card>
 
         <Alert
           message="Recommendation"
-          description="Create a backup of your current data before proceeding with restore."
+          description={
+            <div>
+              <div>• Create a backup of your current data before proceeding</div>
+              <div>• Ensure this is the correct backup file</div>
+              <div>• System will be unavailable during restore process</div>
+            </div>
+          }
           type="warning"
           showIcon
         />

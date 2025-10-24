@@ -43,13 +43,36 @@ const FemaleAdmin = () => {
   }, []);
 
   const getAdminTitle = () => {
-    return "Prison Management System - Female Division";
+    if (!user) return "Visitor Management System";
+    
+    const role = user.role.toLowerCase();
+    if (role === 'fulladmin') return "Visitor Management System - Full Access";
+    if (role === 'maleadmin') return "Visitor Management System - Male Division";
+    if (role === 'femaleadmin') return "Visitor Management System - Female Division";
+    return "Visitor Management System";
   };
 
   const getAccessBadge = () => {
+    if (!user) return null;
+    
+    const role = user.role.toLowerCase();
+    let badgeText = "";
+    let badgeVariant = "";
+    
+    if (role === 'fulladmin') {
+      badgeText = "Full Access";
+      badgeVariant = "success";
+    } else if (role === 'maleadmin') {
+      badgeText = "Male Access Only";
+      badgeVariant = "primary";
+    } else if (role === 'femaleadmin') {
+      badgeText = "Female Access Only";
+      badgeVariant = "danger";
+    }
+    
     return (
-      <Badge bg="danger" className="ms-2 access-badge">
-        Female Access Only
+      <Badge bg={badgeVariant} className="ms-2 access-badge">
+        {badgeText}
       </Badge>
     );
   };
@@ -57,26 +80,28 @@ const FemaleAdmin = () => {
   return (
     <div className="dashboard">
       <div className={`sidebar ${isSidebarClosed ? "close" : ""}`}>
-        <NavLink to="/femaleadmin/dashboard" className="logo">
-          <i className="bx bx-shield-quarter"></i>
-          <div className="logo-name">
-            <span>Prison Management</span>
-            {getAccessBadge()}
-          </div>
-        </NavLink>
+  <NavLink to="/admin/dashboard" className="logo">
+    <i className="bx bx-shield-quarter"></i>
+    <div className="logo-name">
+      <span>Visitor Management</span>
+      <div className="access-badge-container">
+        {getAccessBadge()}
+      </div>
+    </div>
+  </NavLink>
         <ul className="side-menu">
           {[
-            { name: "Dashboard", icon: "bx bxs-dashboard", path: "/femaleadmin/dashboard" },
-            { name: "Recorded Visits", icon: "bx bxs-calendar-check", path: "/femaleadmin/record-visits" },
-            { name: "Visitors", icon: "bx bxs-user-voice", path: "/femaleadmin/visitors" },
-            { name: "Guests", icon: "bx bxs-user-badge", path: "/femaleadmin/guest" },
-            { name: "Inmates", icon: "bx bxs-user-account", path: "/femaleadmin/inmates" },
-            { name: "Crime List", icon: "bx bxs-error", path: "/femaleadmin/crimes" },
-            { name: "Reports", icon: "bx bxs-report", path: "/femaleadmin/reports-analytics" },
-            { name: "Pending Visitors", icon: "bx bxs-time-five", path: "/femaleadmin/pending-requests" },
-            { name: "User Management", icon: "bx bxs-user-detail", path: "/femaleadmin/user-management" },
-            { name: "Maintenance", icon: "bx bxs-wrench", path: "/femaleadmin/maintenance" },
-            { name: "System Logs", icon: "bx bxs-notepad", path: "/femaleadmin/logs" },
+            { name: "Dashboard", icon: "bx bxs-dashboard", path: "/admin/dashboard" },
+            { name: "Recorded Visits", icon: "bx bxs-calendar-check", path: "/admin/record-visits" },
+            { name: "Visitors", icon: "bx bxs-user-voice", path: "/admin/visitors" },
+            { name: "Guests", icon: "bx bxs-user-badge", path: "/admin/guest" },
+            { name: "Inmates", icon: "bx bxs-user-account", path: "/admin/inmates" },
+            { name: "Crime List", icon: "bx bxs-error", path: "/admin/crimes" },
+            { name: "Reports", icon: "bx bxs-report", path: "/admin/reports-analytics" },
+            { name: "Pending Visitors", icon: "bx bxs-time-five", path: "/admin/pending-requests" },
+            { name: "User Management", icon: "bx bxs-user-detail", path: "/admin/user-management" },
+            { name: "Maintenance", icon: "bx bxs-wrench", path: "/admin/maintenance" },
+            { name: "System Logs", icon: "bx bxs-notepad", path: "/admin/logs" },
           ].map((link, index) => (
             <li key={index}>
               <NavLink
@@ -110,6 +135,7 @@ const FemaleAdmin = () => {
             <h5 className="mb-0">{getAdminTitle()}</h5>
           </div>
           
+          {/* Scan QR Button in Navigation */}
           <Button 
             variant="success" 
             onClick={() => setShowScanModal(true)}
@@ -125,8 +151,8 @@ const FemaleAdmin = () => {
               <div className="profile">
                 <img src="/img/admin.png" alt="Profile" />
                 <span className="profile-info">
-                  <strong>{user?.name || 'Female Admin'}</strong>
-                  <small>FEMALE ADMIN</small>
+                  <strong>{user?.name || 'Admin'}</strong>
+                  <small>{user?.role || 'ADMIN'}</small>
                 </span>
               </div>
             </Dropdown.Toggle>
@@ -135,7 +161,7 @@ const FemaleAdmin = () => {
               <Dropdown.Header>
                 Signed in as {user?.name}
               </Dropdown.Header>
-              <Dropdown.Item as={NavLink} to="/femaleadmin/dashboard">
+              <Dropdown.Item as={NavLink} to="/admin/dashboard">
                 <i className="bx bx-user me-2"></i>
                 Profile
               </Dropdown.Item>
@@ -150,7 +176,7 @@ const FemaleAdmin = () => {
 
         <main>
           <Routes>
-            <Route path="/" element={<Navigate to="/femaleadmin/dashboard" />} />
+            <Route path="/" element={<Navigate to="/admin/dashboard" />} />
             <Route path="/dashboard" element={<DashboardHome />} />
             <Route path="/record-visits" element={<RecordVisits />} />
             <Route path="/visitors" element={<Visitors />} />
@@ -166,6 +192,7 @@ const FemaleAdmin = () => {
         </main>
       </div>
 
+      {/* QR Scanner Modal */}
       <ScanQR 
         show={showScanModal} 
         onHide={() => setShowScanModal(false)} 

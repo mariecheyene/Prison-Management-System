@@ -62,7 +62,17 @@ const Visitors = () => {
     setIsLoading(true);
     try {
       const response = await axios.get("http://localhost:5000/visitors");
-      setVisitors(response.data);
+      // Sort visitors alphabetically by last name, then first name
+      const sortedVisitors = response.data.sort((a, b) => {
+        // Compare last names first
+        const lastNameCompare = a.lastName.localeCompare(b.lastName);
+        if (lastNameCompare !== 0) {
+          return lastNameCompare;
+        }
+        // If last names are the same, compare first names
+        return a.firstName.localeCompare(b.firstName);
+      });
+      setVisitors(sortedVisitors);
     } catch (error) {
       console.error("Error fetching visitors:", error);
       toast.error("Failed to fetch visitors");
@@ -284,7 +294,7 @@ const Visitors = () => {
       
       setShowModal(false);
       resetForm();
-      fetchVisitors();
+      fetchVisitors(); // This will re-fetch and re-sort the visitors
     } catch (error) {
       console.error('Error submitting visitor:', error);
       console.error('Error response:', error.response?.data);
@@ -322,7 +332,7 @@ const Visitors = () => {
       toast.success(response.data.message);
       setShowUploadModal(false);
       setCsvFile(null);
-      fetchVisitors();
+      fetchVisitors(); // This will re-fetch and re-sort the visitors
     } catch (error) {
       console.error('Error uploading CSV:', error);
       toast.error(error.response?.data?.message || 'Failed to upload CSV');

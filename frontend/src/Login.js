@@ -180,7 +180,7 @@ const Login = () => {
     <div
       className="login-page"
       style={{
-        backgroundImage: `url('/img/acmac.jpg')`,
+        backgroundImage: `url('/img/background.png')`,
         backgroundSize: "cover",
         backgroundPosition: "center",
         height: "100vh",

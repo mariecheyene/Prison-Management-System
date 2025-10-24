@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { Form, Button, Modal, Spinner, Table, Badge, Card, Row, Col } from "react-bootstrap";
+import { Form, Button, Modal, Spinner, Table, Badge, Card, Row, Col, InputGroup } from "react-bootstrap";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import axios from "axios";
-import { Edit2, Trash2 } from 'react-feather'; // Import the same icons
+import { Edit2, Trash2, Eye, EyeOff } from 'react-feather';
 import "../../css/Dashboard.css";
 
 const UserManagement = () => {
@@ -23,6 +23,7 @@ const UserManagement = () => {
   const [users, setUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [roleError, setRoleError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   // Predefined system accounts that cannot be edited or deleted
   const predefinedAccounts = ["fulladmin@prison.com", "system@prison.com"];
@@ -75,6 +76,7 @@ const UserManagement = () => {
 
       toast.success("User created successfully!");
       setFormData({ name: "", email: "", password: "", role: "" });
+      setShowPassword(false);
       fetchUsers();
       setShowModal(false);
     } catch (error) {
@@ -107,7 +109,14 @@ const UserManagement = () => {
     setIsLoading(true);
 
     try {
-      const response = await axios.put(`http://localhost:5000/users/${editFormData.email}`, {
+      // Find the user ID from the users array
+      const userToUpdate = users.find(user => user.email === editFormData.email);
+      if (!userToUpdate) {
+        toast.error("User not found");
+        return;
+      }
+
+      const response = await axios.put(`http://localhost:5000/users/${userToUpdate._id}`, {
         name: editFormData.name,
         role: editFormData.role
       });
@@ -137,7 +146,14 @@ const UserManagement = () => {
 
     setIsLoading(true);
     try {
-      await axios.delete(`http://localhost:5000/users/${email}`);
+      // Find the user ID from the users array
+      const userToDelete = users.find(user => user.email === email);
+      if (!userToDelete) {
+        toast.error("User not found");
+        return;
+      }
+
+      await axios.delete(`http://localhost:5000/users/${userToDelete._id}`);
       toast.success("User deleted successfully!");
       fetchUsers();
     } catch (error) {
@@ -313,6 +329,7 @@ const UserManagement = () => {
         setShowModal(false);
         setRoleError("");
         setFormData({ name: "", email: "", password: "", role: "" });
+        setShowPassword(false);
       }}>
         <Modal.Header closeButton>
           <Modal.Title>Add New User</Modal.Title>
@@ -345,15 +362,24 @@ const UserManagement = () => {
             
             <Form.Group className="mb-3">
               <Form.Label>Password</Form.Label>
-              <Form.Control
-                type="password"
-                name="password"
-                value={formData.password}
-                onChange={handleInputChange}
-                placeholder="Enter password"
-                required
-                minLength="6"
-              />
+              <InputGroup>
+                <Form.Control
+                  type={showPassword ? "text" : "password"}
+                  name="password"
+                  value={formData.password}
+                  onChange={handleInputChange}
+                  placeholder="Enter password"
+                  required
+                  minLength="6"
+                />
+                <Button 
+                  variant="outline-secondary"
+                  onClick={() => setShowPassword(!showPassword)}
+                  style={{ borderLeft: 'none' }}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </Button>
+              </InputGroup>
               <Form.Text className="text-muted">
                 Password must be at least 6 characters long.
               </Form.Text>
@@ -397,6 +423,7 @@ const UserManagement = () => {
                 onClick={() => {
                   setShowModal(false);
                   setRoleError("");
+                  setShowPassword(false);
                 }}
                 disabled={isLoading}
               >

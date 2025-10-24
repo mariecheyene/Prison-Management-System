@@ -39,6 +39,8 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import axios from 'axios';
 
+const API_BASE_URL = 'http://localhost:5000'; // Add this constant
+
 const ReportsAnalytics = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -73,8 +75,8 @@ const ReportsAnalytics = () => {
 
       console.log('🔄 Fetching REAL analytics data with params:', params);
 
-      // Use the analytics endpoint that gets REAL data
-      const response = await axios.get('/analytics/reports', { params });
+      // FIXED: Use the correct backend URL
+      const response = await axios.get(`${API_BASE_URL}/analytics/reports`, { params });
       
       if (response.data.success) {
         setChartData(response.data.chartData || []);
@@ -264,7 +266,25 @@ const ReportsAnalytics = () => {
                 strokeWidth={2}
                 dot={{ fill: '#8884d8', strokeWidth: 2, r: 4 }}
                 activeDot={{ r: 6, stroke: '#8884d8', strokeWidth: 2 }}
-                name="Number of Visitors"
+                name="Visitors"
+              />
+              <Line 
+                type="monotone" 
+                dataKey="guests" 
+                stroke="#82ca9d" 
+                strokeWidth={2}
+                dot={{ fill: '#82ca9d', strokeWidth: 2, r: 4 }}
+                activeDot={{ r: 6, stroke: '#82ca9d', strokeWidth: 2 }}
+                name="Guests"
+              />
+              <Line 
+                type="monotone" 
+                dataKey="total" 
+                stroke="#ff8042" 
+                strokeWidth={3}
+                dot={{ fill: '#ff8042', strokeWidth: 2, r: 5 }}
+                activeDot={{ r: 8, stroke: '#ff8042', strokeWidth: 2 }}
+                name="Total Visits"
               />
             </LineChart>
           </ResponsiveContainer>
@@ -290,20 +310,31 @@ const ReportsAnalytics = () => {
       );
     }
 
-    return Object.entries(summaryData).map(([key, value], index) => (
-      <Grid item xs={12} sm={6} md={3} key={key}>
-        <Card sx={{ height: '100%' }}>
-          <CardContent>
-            <Typography color="textSecondary" gutterBottom variant="overline" sx={{ fontSize: '0.7rem' }}>
-              {key.replace(/([A-Z])/g, ' $1').toUpperCase()}
-            </Typography>
-            <Typography variant="h5" component="div" sx={{ fontWeight: 'bold' }}>
-              {typeof value === 'object' ? JSON.stringify(value) : value}
-            </Typography>
-          </CardContent>
-        </Card>
-      </Grid>
-    ));
+    const keyMetrics = [
+      { key: 'totalVisits', label: 'Total Visits', color: '#1976d2' },
+      { key: 'totalVisitors', label: 'Total Visitors', color: '#2e7d32' },
+      { key: 'totalGuests', label: 'Total Guests', color: '#ed6c02' },
+      { key: 'avgDailyVisits', label: 'Avg Daily Visits', color: '#9c27b0' },
+      { key: 'daysWithVisits', label: 'Active Days', color: '#d32f2f' },
+      { key: 'averageDuration', label: 'Avg Duration', color: '#0288d1' }
+    ];
+
+    return keyMetrics
+      .filter(metric => summaryData[metric.key] !== undefined)
+      .map((metric, index) => (
+        <Grid item xs={12} sm={6} md={4} lg={2} key={metric.key}>
+          <Card sx={{ height: '100%', borderLeft: `4px solid ${metric.color}` }}>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom variant="overline" sx={{ fontSize: '0.7rem' }}>
+                {metric.label}
+              </Typography>
+              <Typography variant="h5" component="div" sx={{ fontWeight: 'bold', color: metric.color }}>
+                {summaryData[metric.key]}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      ));
   };
 
   return (
@@ -372,7 +403,6 @@ const ReportsAnalytics = () => {
                   <MenuItem value="daily">Daily Visitors</MenuItem>
                   <MenuItem value="weekly">Weekly Trends</MenuItem>
                   <MenuItem value="monthly">Monthly Overview</MenuItem>
-                  <MenuItem value="yearly">Yearly Analysis</MenuItem>
                   <MenuItem value="demographic">Demographics</MenuItem>
                   <MenuItem value="performance">Performance Metrics</MenuItem>
                 </Select>

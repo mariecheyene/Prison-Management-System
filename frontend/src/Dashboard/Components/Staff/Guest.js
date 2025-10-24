@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Container, Row, Col, Table, Button, Modal, Form, 
-  Alert, Badge, Spinner, InputGroup, Card
+  Alert, Badge, Spinner, InputGroup, Card, ButtonGroup 
 } from 'react-bootstrap';
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -10,8 +10,10 @@ import {
   Search, 
   Plus, 
   Eye, 
+  Edit2, 
   Download,
   Printer,
+  User,
   Grid
 } from 'react-feather';
 
@@ -21,6 +23,7 @@ const Guest = () => {
   const [showModal, setShowModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
+  const [editingGuest, setEditingGuest] = useState(null);
   const [selectedGuest, setSelectedGuest] = useState(null);
   const [selectedQRGuest, setSelectedQRGuest] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -32,7 +35,8 @@ const Guest = () => {
     { value: 'lastName', label: 'Last Name' },
     { value: 'firstName', label: 'First Name' },
     { value: 'id', label: 'Guest ID' },
-    { value: 'visitPurpose', label: 'Visit Purpose' }
+    { value: 'visitPurpose', label: 'Visit Purpose' },
+    { value: 'violationType', label: 'Violation Type' }
   ];
 
   useEffect(() => {
@@ -47,9 +51,8 @@ const Guest = () => {
     setIsLoading(true);
     try {
       const response = await axios.get("http://localhost:5000/guests");
-      // Filter only approved guests (not pending ones)
-      const approvedGuests = response.data.filter(guest => guest.status === 'approved' || guest.status === 'completed');
-      setGuests(approvedGuests);
+      // REMOVED THE FILTER - NOW SHOWS ALL GUESTS
+      setGuests(response.data);
     } catch (error) {
       console.error("Error fetching guests:", error);
       toast.error("Failed to fetch guests");
@@ -74,6 +77,7 @@ const Guest = () => {
   };
 
   const handleAdd = () => {
+    setEditingGuest(null);
     const initialData = {
       lastName: '',
       firstName: '',
@@ -85,9 +89,20 @@ const Guest = () => {
       address: '',
       contact: '',
       visitPurpose: '',
+      status: 'pending' // Changed to pending for approval workflow
     };
     setFormData(initialData);
     setImageFile(null);
+    setShowModal(true);
+  };
+
+  const handleEdit = (guest) => {
+    setEditingGuest(guest);
+    const formattedGuest = {
+      ...guest,
+      dateOfBirth: guest.dateOfBirth ? guest.dateOfBirth.split('T')[0] : ''
+    };
+    setFormData(formattedGuest);
     setShowModal(true);
   };
 
@@ -101,6 +116,8 @@ const Guest = () => {
     setShowQRModal(true);
   };
 
+  // REMOVED handleDelete function
+
   const [formData, setFormData] = useState({
     lastName: '',
     firstName: '',
@@ -112,6 +129,7 @@ const Guest = () => {
     address: '',
     contact: '',
     visitPurpose: '',
+    status: 'pending' // Changed to pending for approval workflow
   });
 
   const handleInputChange = (e) => {
@@ -157,6 +175,7 @@ const Guest = () => {
         middleName: formData.middleName || '',
         extension: formData.extension || '',
         age: formData.age || '',
+        status: 'pending' // Always goes to pending first
       };
 
       Object.keys(formattedData).forEach(key => {
@@ -169,26 +188,78 @@ const Guest = () => {
         submitData.append('photo', imageFile);
       }
 
-      // Submit to pending guests endpoint instead of regular guests
-      const response = await axios.post("http://localhost:5000/pending-guests", submitData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
-      
-      toast.success('Guest request submitted successfully! Waiting for admin approval.');
+      let response;
+      if (editingGuest) {
+        response = await axios.put(`http://localhost:5000/guests/${editingGuest.id}`, submitData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+        toast.success('Guest updated successfully!');
+      } else {
+        // Send to pending-guests endpoint for approval workflow
+        response = await axios.post("http://localhost:5000/pending-guests", submitData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+        toast.success('Guest request submitted for approval!');
+      }
       
       setShowModal(false);
       resetForm();
+      fetchGuests();
     } catch (error) {
-      console.error('Error submitting guest request:', error);
+      console.error('Error submitting guest:', error);
       const errorMessage = error.response?.data?.message || 
                         error.response?.data?.error || 
-                        'Failed to submit guest request';
+                        `Failed to ${editingGuest ? 'update' : 'create'} guest`;
       toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const exportToCSV = () => {
+    const headers = [
+      'Guest ID', 'Last Name', 'First Name', 'Middle Name', 'Extension',
+      'Date of Birth', 'Age', 'Gender', 'Address', 'Contact',
+      'Visit Purpose', 'Status', 'Violation Type', 'Violation Details', 'Date Visited', 'Time In', 'Time Out'
+    ];
+
+    const csvData = guests.map(guest => [
+      guest.id,
+      guest.lastName,
+      guest.firstName,
+      guest.middleName || '',
+      guest.extension || '',
+      guest.dateOfBirth ? new Date(guest.dateOfBirth).toLocaleDateString() : '',
+      guest.age || '',
+      guest.sex,
+      guest.address,
+      guest.contact,
+      guest.visitPurpose,
+      guest.status || 'approved',
+      guest.violationType || 'No violation',
+      guest.violationDetails || 'No violation data',
+      guest.dateVisited ? new Date(guest.dateVisited).toLocaleDateString() : 'Not visited',
+      guest.timeIn || 'Not recorded',
+      guest.timeOut || 'Not recorded'
+    ]);
+
+    const csvContent = [headers, ...csvData]
+      .map(row => row.map(field => `"${field}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `guests_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    window.URL.revokeObjectURL(url);
+    
+    toast.success(`Exported ${guests.length} guests to CSV`);
   };
 
   const downloadQRCode = () => {
@@ -215,6 +286,7 @@ const Guest = () => {
       address: '',
       contact: '',
       visitPurpose: '',
+      status: 'pending'
     });
     setImageFile(null);
   };
@@ -232,18 +304,10 @@ const Guest = () => {
   };
 
   const getTimeStatus = (guest) => {
-    // Check today's visit status from dailyVisits
-    const today = new Date().toISOString().split('T')[0];
-    const todayVisit = guest.dailyVisits?.find(visit => {
-      if (!visit.visitDate) return false;
-      const visitDate = new Date(visit.visitDate).toISOString().split('T')[0];
-      return visitDate === today;
-    });
-
-    if (!todayVisit) return { variant: 'secondary', text: 'Not Checked In' };
-    if (todayVisit.hasTimedIn && !todayVisit.hasTimedOut) return { variant: 'success', text: 'Checked In' };
-    if (todayVisit.hasTimedIn && todayVisit.hasTimedOut) return { variant: 'info', text: 'Checked Out' };
-    return { variant: 'secondary', text: 'Not Checked In' };
+    if (!guest.hasTimedIn) return { variant: 'secondary', text: 'Not Checked In' };
+    if (guest.hasTimedIn && !guest.hasTimedOut) return { variant: 'success', text: 'Checked In' };
+    if (guest.hasTimedIn && guest.hasTimedOut) return { variant: 'info', text: 'Checked Out' };
+    return { variant: 'secondary', text: 'Unknown' };
   };
 
   const getViolationVariant = (guest) => {
@@ -258,6 +322,16 @@ const Guest = () => {
       return guest.violationType;
     }
     return 'No violation';
+  };
+
+  const getStatusVariant = (guest) => {
+    switch (guest.status) {
+      case 'approved': return 'success';
+      case 'completed': return 'info';
+      case 'pending': return 'warning';
+      case 'rejected': return 'danger';
+      default: return 'secondary';
+    }
   };
 
   const formatDate = (dateString) => {
@@ -278,6 +352,7 @@ const Guest = () => {
     }
   };
 
+  // Custom print functionality like in Visitor.js
   const printGuestDetails = () => {
     const printWindow = window.open('', '_blank');
     const timeStatus = getTimeStatus(selectedGuest);
@@ -380,6 +455,14 @@ const Guest = () => {
             .status-success { background-color: #28a745; }
             .status-info { background-color: #17a2b8; }
             .status-secondary { background-color: #6c757d; }
+            .status-badge {
+              display: inline-block;
+              padding: 4px 8px;
+              border-radius: 4px;
+              color: white;
+              font-weight: bold;
+              margin-left: 5px;
+            }
             @media print {
               body { margin: 10px; }
               .section { border: none; }
@@ -403,11 +486,26 @@ const Guest = () => {
               <h3>Time Tracking Information</h3>
               <div class="info-grid">
                 <div class="info-item">
-                  <span class="label">Last Visit Date:</span> ${selectedGuest.lastVisitDate ? new Date(selectedGuest.lastVisitDate).toLocaleDateString() : 'No visits yet'}
+                  <span class="label">Visit Date:</span> ${selectedGuest.dateVisited ? new Date(selectedGuest.dateVisited).toLocaleDateString() : 'Not yet visited'}
                 </div>
                 <div class="info-item">
-                  <span class="label">Current Status:</span> 
+                  <span class="label">Time In:</span> ${selectedGuest.timeIn || 'Not recorded'}
+                </div>
+                <div class="info-item">
+                  <span class="label">Time Out:</span> ${selectedGuest.timeOut || 'Not recorded'}
+                </div>
+                <div class="info-item">
+                  <span class="label">Time Status:</span> 
                   <span class="time-status status-${timeStatus.variant}">${timeStatus.text}</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">Guest Status:</span> 
+                  <span class="status-badge" style="background-color: ${
+                    selectedGuest.status === 'approved' ? '#28a745' :
+                    selectedGuest.status === 'completed' ? '#17a2b8' :
+                    selectedGuest.status === 'pending' ? '#ffc107' :
+                    selectedGuest.status === 'rejected' ? '#dc3545' : '#6c757d'
+                  }">${selectedGuest.status?.toUpperCase() || 'APPROVED'}</span>
                 </div>
               </div>
             </div>
@@ -464,6 +562,16 @@ const Guest = () => {
                 <div class="info-item full-width">
                   <span class="label">Visit Purpose:</span> ${selectedGuest.visitPurpose}
                 </div>
+                ${selectedGuest.approvedBy ? `
+                <div class="info-item">
+                  <span class="label">Approved By:</span> ${selectedGuest.approvedBy}
+                </div>
+                ` : ''}
+                ${selectedGuest.rejectedBy ? `
+                <div class="info-item">
+                  <span class="label">Rejected By:</span> ${selectedGuest.rejectedBy}
+                </div>
+                ` : ''}
               </div>
             </div>
 
@@ -508,13 +616,17 @@ const Guest = () => {
       <div className="d-flex justify-content-between align-items-center mb-4">
         <div>
           <h2 style={{ fontFamily: "Poppins, sans-serif", fontWeight: "600", color: "#2c3e50" }}>
-            👤 Guests Management (Staff)
+            👤 Guests Management
           </h2>
           <Badge bg="info" className="mb-2">
-            Staff Access - View Only
+            Admin Access
           </Badge>
         </div>
         <div className="d-flex gap-2">
+          <Button variant="outline-dark" size="sm" onClick={exportToCSV}>
+            <Download size={16} className="me-1" />
+            Export CSV
+          </Button>
           <Button variant="dark" onClick={handleAdd}>
             <Plus size={16} className="me-1" />
             Request New Guest
@@ -553,7 +665,7 @@ const Guest = () => {
             </Col>
             <Col md={4}>
               <div className="text-muted small">
-                {filteredGuests.length} approved guests found
+                {filteredGuests.length} guests found 
               </div>
             </Col>
           </Row>
@@ -568,7 +680,7 @@ const Guest = () => {
         </div>
       ) : filteredGuests.length === 0 ? (
         <Alert variant="info">
-          {searchQuery ? 'No guests found matching your search.' : 'No approved guests found.'}
+          {searchQuery ? 'No guests found matching your search.' : 'No guests found. Add your first guest to get started.'}
         </Alert>
       ) : (
         <Table striped bordered hover responsive className="bg-white">
@@ -578,6 +690,7 @@ const Guest = () => {
               <th>Full Name</th>
               <th>Gender</th>
               <th>Visit Purpose</th>
+              <th>Status</th>
               <th>Last Visit Date</th>
               <th>Time Status</th>
               <th>Violation Type</th>
@@ -592,9 +705,14 @@ const Guest = () => {
                 <td>{guest.sex}</td>
                 <td>{guest.visitPurpose}</td>
                 <td>
-                  {guest.lastVisitDate ? (
+                  <Badge bg={getStatusVariant(guest)}>
+                    {guest.status?.toUpperCase() || 'APPROVED'}
+                  </Badge>
+                </td>
+                <td>
+                  {guest.dateVisited ? (
                     <Badge bg="info">
-                      {formatDate(guest.lastVisitDate)}
+                      {formatDate(guest.dateVisited)}
                     </Badge>
                   ) : (
                     <Badge bg="secondary">Not visited</Badge>
@@ -630,6 +748,16 @@ const Guest = () => {
                     >
                       <Eye size={14} />
                     </Button>
+                    <Button 
+                      variant="outline-warning" 
+                      size="sm" 
+                      onClick={() => handleEdit(guest)}
+                      className="p-1"
+                      title="Edit Guest"
+                    >
+                      <Edit2 size={14} />
+                    </Button>
+                    {/* DELETE BUTTON REMOVED */}
                   </div>
                 </td>
               </tr>
@@ -638,18 +766,13 @@ const Guest = () => {
         </Table>
       )}
 
-      {/* Add Request Modal */}
+      {/* Add/Edit Modal */}
       <Modal show={showModal} onHide={() => setShowModal(false)} size="lg">
         <Modal.Header closeButton>
-          <Modal.Title>Request New Guest</Modal.Title>
+          <Modal.Title>{editingGuest ? 'Edit Guest' : 'Add New Guest'}</Modal.Title>
         </Modal.Header>
         <Form onSubmit={handleSubmit}>
           <Modal.Body style={{ maxHeight: '70vh', overflowY: 'auto' }}>
-            <Alert variant="warning">
-              <strong>Note for Staff:</strong> All guest requests require admin approval. 
-              The guest will be available in the system only after approval.
-            </Alert>
-
             <Row>
               <Col md={6}>
                 <Form.Group className="mb-3">
@@ -802,7 +925,8 @@ const Guest = () => {
             </Form.Group>
 
             <Alert variant="info" className="mt-3">
-              <strong>Note:</strong> Time in and time out will be automatically recorded when the guest scans their QR code at the entrance/exit.
+              <strong>Note:</strong> Guest requests will be submitted for approval. 
+              Once approved, they will appear in the main guests list and receive a QR code for identification.
             </Alert>
           </Modal.Body>
           <Modal.Footer>
@@ -810,7 +934,7 @@ const Guest = () => {
               Cancel
             </Button>
             <Button variant="dark" type="submit" disabled={isLoading}>
-              {isLoading ? <Spinner size="sm" /> : 'Submit Request'}
+              {isLoading ? <Spinner size="sm" /> : (editingGuest ? 'Update' : 'Add') + ' Guest'}
             </Button>
           </Modal.Footer>
         </Form>
@@ -832,12 +956,13 @@ const Guest = () => {
                   <Card.Body>
                     <Row>
                       <Col md={6}>
-                        <p><strong>Last Visit Date:</strong> {selectedGuest.lastVisitDate ? new Date(selectedGuest.lastVisitDate).toLocaleDateString() : 'No visits yet'}</p>
-                        <p><strong>Current Status:</strong> <Badge bg={getTimeStatus(selectedGuest).variant}>{getTimeStatus(selectedGuest).text}</Badge></p>
+                        <p><strong>Visit Date:</strong> {selectedGuest.dateVisited ? new Date(selectedGuest.dateVisited).toLocaleDateString() : 'Not yet visited'}</p>
+                        <p><strong>Time In:</strong> {selectedGuest.timeIn || 'Not recorded'}</p>
                       </Col>
                       <Col md={6}>
-                        <p><strong>Total Visits:</strong> {selectedGuest.dailyVisits?.length || 0}</p>
-                        <p><strong>Guest Status:</strong> <Badge bg={selectedGuest.status === 'approved' ? 'success' : 'secondary'}>{selectedGuest.status}</Badge></p>
+                        <p><strong>Time Out:</strong> {selectedGuest.timeOut || 'Not recorded'}</p>
+                        <p><strong>Time Status:</strong> <Badge bg={getTimeStatus(selectedGuest).variant}>{getTimeStatus(selectedGuest).text}</Badge></p>
+                        <p><strong>Guest Status:</strong> <Badge bg={getStatusVariant(selectedGuest)}>{selectedGuest.status?.toUpperCase() || 'APPROVED'}</Badge></p>
                       </Col>
                     </Row>
                   </Card.Body>
@@ -913,7 +1038,13 @@ const Guest = () => {
                   </Card.Header>
                   <Card.Body>
                     <p><strong>Visit Purpose:</strong> {selectedGuest.visitPurpose}</p>
-                    <p><strong>Approval Date:</strong> {selectedGuest.approvedAt ? new Date(selectedGuest.approvedAt).toLocaleDateString() : 'N/A'}</p>
+                    <p><strong>Status:</strong> <Badge bg={getStatusVariant(selectedGuest)}>{selectedGuest.status?.toUpperCase() || 'APPROVED'}</Badge></p>
+                    {selectedGuest.approvedBy && (
+                      <p><strong>Approved By:</strong> {selectedGuest.approvedBy}</p>
+                    )}
+                    {selectedGuest.rejectedBy && (
+                      <p><strong>Rejected By:</strong> {selectedGuest.rejectedBy}</p>
+                    )}
                   </Card.Body>
                 </Card>
 
@@ -960,10 +1091,13 @@ const Guest = () => {
                   />
                   <p className="mt-3"><strong>{selectedQRGuest.fullName}</strong></p>
                   <p className="text-muted">Guest ID: {selectedQRGuest.id}</p>
+                  <Badge bg={getStatusVariant(selectedQRGuest)}>
+                    Status: {selectedQRGuest.status?.toUpperCase() || 'APPROVED'}
+                  </Badge>
                 </>
               ) : (
                 <Alert variant="warning">
-                  QR code not generated yet.
+                  QR code not generated yet. Please wait or regenerate QR code.
                 </Alert>
               )}
             </>

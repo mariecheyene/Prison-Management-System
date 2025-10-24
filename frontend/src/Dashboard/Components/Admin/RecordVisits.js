@@ -57,7 +57,7 @@ const RecordVisits = () => {
     notes: ''
   });
 
-  // FIXED: Added counts state to prevent recalculating on tab switch
+  // Counts state
   const [counts, setCounts] = useState({
     all: 0,
     visitors: 0,
@@ -83,7 +83,6 @@ const RecordVisits = () => {
     'Prohibited Items',
     'Unauthorized Areas',
     'Disruptive Behavior',
-    'Ban',
     'Other'
   ];
 
@@ -108,7 +107,6 @@ const RecordVisits = () => {
     filterLogs();
   }, [visitLogs, startDate, endDate, searchQuery, searchBy, activeTab]);
 
-  // FIXED: Calculate counts whenever visitLogs, violators, or banned change
   useEffect(() => {
     const visitorLogs = visitLogs.filter(log => log.personType === 'visitor');
     const guestLogs = visitLogs.filter(log => log.personType === 'guest');
@@ -174,74 +172,85 @@ const RecordVisits = () => {
   };
 
   const fetchViolators = async () => {
-    try {
-      const [visitorsRes, guestsRes] = await Promise.all([
-        axios.get(`${API_BASE}/visitors`),
-        axios.get(`${API_BASE}/guests`)
-      ]);
-      
-      const visitorsWithViolations = visitorsRes.data
-        .filter(visitor => visitor.violationType && visitor.violationType !== 'Ban')
-        .map(visitor => ({
-          ...visitor,
-          personType: 'visitor',
-          personName: visitor.fullName,
-          id: visitor.id
-        }));
-      
-      const guestsWithViolations = guestsRes.data
-        .filter(guest => guest.violationType && guest.violationType !== 'Ban')
-        .map(guest => ({
-          ...guest,
-          personType: 'guest',
-          personName: guest.fullName,
-          id: guest.id
-        }));
-      
-      const allViolators = [...visitorsWithViolations, ...guestsWithViolations];
-      setViolators(allViolators);
-    } catch (error) {
-      console.error('Error fetching violators:', error);
-      toast.error('Failed to fetch violators');
-    }
-  };
+  try {
+    const [visitorsRes, guestsRes] = await Promise.all([
+      axios.get(`${API_BASE}/visitors`),
+      axios.get(`${API_BASE}/guests`)
+    ]);
+    
+    // Only show violators who are NOT banned and have violations
+    const visitorsWithViolations = visitorsRes.data
+      .filter(visitor => 
+        visitor.violationType && 
+        visitor.violationType !== 'Ban' && 
+        visitor.isBanned !== true
+      )
+      .map(visitor => ({
+        ...visitor,
+        personType: 'visitor',
+        personName: visitor.fullName,
+        id: visitor.id
+      }));
+    
+    const guestsWithViolations = guestsRes.data
+      .filter(guest => 
+        guest.violationType && 
+        guest.violationType !== 'Ban' && 
+        guest.isBanned !== true
+      )
+      .map(guest => ({
+        ...guest,
+        personType: 'guest',
+        personName: guest.fullName,
+        id: guest.id
+      }));
+    
+    const allViolators = [...visitorsWithViolations, ...guestsWithViolations];
+    setViolators(allViolators);
+  } catch (error) {
+    console.error('Error fetching violators:', error);
+    toast.error('Failed to fetch violators');
+  }
+};
 
   const fetchBanned = async () => {
-    try {
-      const [visitorsRes, guestsRes] = await Promise.all([
-        axios.get(`${API_BASE}/visitors`),
-        axios.get(`${API_BASE}/guests`)
-      ]);
-      
-      const bannedVisitors = visitorsRes.data
-        .filter(visitor => visitor.isBanned || visitor.violationType === 'Ban')
-        .map(visitor => ({
-          ...visitor,
-          personType: 'visitor',
-          personName: visitor.fullName,
-          id: visitor.id,
-          banReason: visitor.banReason || visitor.violationDetails || 'Ban violation',
-          banDuration: visitor.banDuration || 'permanent'
-        }));
-      
-      const bannedGuests = guestsRes.data
-        .filter(guest => guest.isBanned || guest.violationType === 'Ban')
-        .map(guest => ({
-          ...guest,
-          personType: 'guest',
-          personName: guest.fullName,
-          id: guest.id,
-          banReason: guest.banReason || guest.violationDetails || 'Ban violation',
-          banDuration: guest.banDuration || 'permanent'
-        }));
-      
-      const allBanned = [...bannedVisitors, ...bannedGuests];
-      setBanned(allBanned);
-    } catch (error) {
-      console.error('Error fetching banned persons:', error);
-      toast.error('Failed to fetch banned persons');
-    }
-  };
+  try {
+    const [visitorsRes, guestsRes] = await Promise.all([
+      axios.get(`${API_BASE}/visitors`),
+      axios.get(`${API_BASE}/guests`)
+    ]);
+    
+    // ONLY check isBanned field, completely separate from violations
+    const bannedVisitors = visitorsRes.data
+      .filter(visitor => visitor.isBanned === true)
+      .map(visitor => ({
+        ...visitor,
+        personType: 'visitor',
+        personName: visitor.fullName,
+        id: visitor.id,
+        banReason: visitor.banReason || 'Administrative ban',
+        banDuration: visitor.banDuration || 'permanent'
+      }));
+    
+    const bannedGuests = guestsRes.data
+      .filter(guest => guest.isBanned === true)
+      .map(guest => ({
+        ...guest,
+        personType: 'guest',
+        personName: guest.fullName,
+        id: guest.id,
+        banReason: guest.banReason || 'Administrative ban',
+        banDuration: guest.banDuration || 'permanent'
+      }));
+    
+    const allBanned = [...bannedVisitors, ...bannedGuests];
+    console.log('✅ Fetched banned persons:', allBanned.length);
+    setBanned(allBanned);
+  } catch (error) {
+    console.error('Error fetching banned persons:', error);
+    toast.error('Failed to fetch banned persons');
+  }
+};
 
   const filterLogs = () => {
     let filtered = visitLogs;
@@ -315,7 +324,6 @@ const RecordVisits = () => {
     setShowViolationModal(true);
   };
 
-  // FIXED: Ban modal now opens first without immediate banning
   const openBanModal = (log) => {
     setSelectedLog(log);
     setSelectedPerson(null);
@@ -402,23 +410,6 @@ const RecordVisits = () => {
       const response = await axios.put(endpoint, violationData);
       console.log('✅ Violation response:', response.data);
       
-      // If the violation type is "Ban", also set the ban status
-      if (violationForm.violationType === 'Ban') {
-        const banEndpoint = selectedLog.personType === 'visitor' 
-          ? `${API_BASE}/visitors/${selectedLog.personId}/ban`
-          : `${API_BASE}/guests/${selectedLog.personId}/ban`;
-        
-        const banData = {
-          reason: violationForm.violationDetails || 'Ban violation',
-          duration: '1_week',
-          notes: 'Banned due to violation',
-          isBanned: true
-        };
-        
-        await axios.put(banEndpoint, banData);
-        console.log('✅ Ban status set for Ban violation');
-      }
-      
       toast.success("Violation added successfully");
       setShowViolationModal(false);
       setSelectedLog(null);
@@ -427,7 +418,7 @@ const RecordVisits = () => {
       fetchVisitLogs();
     } catch (error) {
       console.error("❌ Error adding violation:", error);
-      console.error("📋 Error details:", error.response?.data);
+      console.error("📋 Error response:", error.response?.data);
       toast.error(`Failed to add violation: ${error.response?.data?.message || error.message}`);
     }
   };
@@ -449,22 +440,6 @@ const RecordVisits = () => {
       };
       
       await axios.put(endpoint, violationData);
-      
-      // If editing to Ban violation, set ban status
-      if (violationForm.violationType === 'Ban') {
-        const banEndpoint = selectedPerson.personType === 'visitor' 
-          ? `${API_BASE}/visitors/${selectedPerson.id}/ban`
-          : `${API_BASE}/guests/${selectedPerson.id}/ban`;
-        
-        const banData = {
-          reason: violationForm.violationDetails || 'Ban violation',
-          duration: '1_week',
-          notes: 'Banned due to violation',
-          isBanned: true
-        };
-        
-        await axios.put(banEndpoint, banData);
-      }
       
       toast.success("Violation updated successfully");
       setShowViolationModal(false);
@@ -496,56 +471,45 @@ const RecordVisits = () => {
     }
   };
 
-  // FIXED: Ban handler that only executes when user confirms in modal
   const handleAddBan = async () => {
-    if (!banForm.reason) {
-      toast.error("Please provide a ban reason");
-      return;
-    }
+  if (!banForm.reason) {
+    toast.error("Please provide a ban reason");
+    return;
+  }
 
-    try {
-      // First add Ban as a violation
-      const violationEndpoint = selectedLog.personType === 'visitor' 
-        ? `${API_BASE}/visitors/${selectedLog.personId}/violation`
-        : `${API_BASE}/guests/${selectedLog.personId}/violation`;
-      
-      const violationData = {
-        violationType: 'Ban',
-        violationDetails: banForm.reason
-      };
-      
-      console.log('🔄 Adding Ban violation to:', violationEndpoint);
-      await axios.put(violationEndpoint, violationData);
-      console.log('✅ Ban violation added successfully');
-      
-      // Then set the ban status
-      const banEndpoint = selectedLog.personType === 'visitor' 
-        ? `${API_BASE}/visitors/${selectedLog.personId}/ban`
-        : `${API_BASE}/guests/${selectedLog.personId}/ban`;
-      
-      const banData = {
-        reason: banForm.reason,
-        duration: banForm.duration,
-        notes: banForm.notes,
-        isBanned: true
-      };
-      
-      console.log('🔄 Setting ban status to:', banEndpoint);
-      const response = await axios.put(banEndpoint, banData);
-      console.log('✅ Ban response:', response.data);
-      
-      toast.success("Person banned successfully");
-      setShowBanModal(false);
-      setSelectedLog(null);
-      fetchBanned();
-      fetchViolators();
-      fetchVisitLogs();
-    } catch (error) {
-      console.error("❌ Error adding ban:", error);
-      console.error("📋 Error details:", error.response?.data);
-      toast.error(`Failed to ban person: ${error.response?.data?.message || error.message}`);
-    }
-  };
+  try {
+    const endpoint = selectedLog.personType === 'visitor' 
+      ? `${API_BASE}/visitors/${selectedLog.personId}/ban`
+      : `${API_BASE}/guests/${selectedLog.personId}/ban`;
+    
+    const banData = {
+      reason: banForm.reason,
+      duration: banForm.duration,
+      notes: banForm.notes,
+      isBanned: true
+    };
+    
+    console.log('🔄 Adding ban to:', endpoint);
+    console.log('📦 Ban data:', banData);
+    
+    const response = await axios.put(endpoint, banData);
+    console.log('✅ Ban response:', response.data);
+    
+    toast.success("Person banned successfully");
+    setShowBanModal(false);
+    setSelectedLog(null);
+    
+    // Refresh data
+    fetchBanned();
+    fetchViolators();
+    fetchVisitLogs();
+    
+  } catch (error) {
+    console.error("❌ Error adding ban:", error);
+    console.error("📋 Error details:", error.response?.data);
+    toast.error(`Failed to ban person: ${error.response?.data?.message || error.message}`);
+  }
+};
 
   const handleEditBan = async () => {
     if (!banForm.reason) {
@@ -567,18 +531,6 @@ const RecordVisits = () => {
       
       await axios.put(endpoint, banData);
       
-      // Update the violation as well if it exists
-      const violationEndpoint = selectedPerson.personType === 'visitor' 
-        ? `${API_BASE}/visitors/${selectedPerson.id}/violation`
-        : `${API_BASE}/guests/${selectedPerson.id}/violation`;
-      
-      const violationData = {
-        violationType: 'Ban',
-        violationDetails: banForm.reason
-      };
-      
-      await axios.put(violationEndpoint, violationData);
-      
       toast.success("Ban updated successfully");
       setShowBanModal(false);
       setSelectedPerson(null);
@@ -590,76 +542,48 @@ const RecordVisits = () => {
     }
   };
 
-  // FIXED: Enhanced remove ban functionality with better error handling
-  const handleRemoveBan = async (personId, personType) => {
-    if (!window.confirm("Are you sure you want to remove this ban?")) {
-      return;
-    }
+const handleRemoveBan = async (personId, personType) => {
+  if (!window.confirm("Are you sure you want to remove this ban and any associated violation records?")) {
+    return;
+  }
 
+  try {
+    // Remove ban
+    const banEndpoint = personType === 'visitor' 
+      ? `${API_BASE}/visitors/${personId}/remove-ban`
+      : `${API_BASE}/guests/${personId}/remove-ban`;
+    
+    console.log('🔄 Removing ban from:', banEndpoint);
+    const banResponse = await axios.put(banEndpoint);
+    console.log('✅ Remove ban response:', banResponse.data);
+
+    // Remove violation WITHOUT showing another confirmation
     try {
-      console.log(`🔄 Removing ban for ${personType} with ID: ${personId}`);
-      
-      // Remove the ban status
-      const banEndpoint = personType === 'visitor' 
-        ? `${API_BASE}/visitors/${personId}/remove-ban`
-        : `${API_BASE}/guests/${personId}/remove-ban`;
-      
-      console.log(`📤 Calling ban removal endpoint: ${banEndpoint}`);
-      const banResponse = await axios.put(banEndpoint);
-      console.log('✅ Ban removal response:', banResponse.data);
-      
-      // Also remove the Ban violation
       const violationEndpoint = personType === 'visitor' 
         ? `${API_BASE}/visitors/${personId}/remove-violation`
         : `${API_BASE}/guests/${personId}/remove-violation`;
       
-      console.log(`📤 Calling violation removal endpoint: ${violationEndpoint}`);
-      const violationResponse = await axios.put(violationEndpoint);
-      console.log('✅ Violation removal response:', violationResponse.data);
-      
-      toast.success("Ban removed successfully");
-      
-      // Refresh all data
-      fetchBanned();
-      fetchViolators();
-      fetchVisitLogs();
-      
-    } catch (error) {
-      console.error("❌ Error removing ban:", error);
-      console.error("📋 Error response:", error.response?.data);
-      console.error("📋 Error status:", error.response?.status);
-      
-      // Try alternative approach if the first one fails
-      try {
-        console.log("🔄 Trying alternative ban removal approach...");
-        
-        // Try to set isBanned to false directly
-        const directEndpoint = personType === 'visitor' 
-          ? `${API_BASE}/visitors/${personId}/ban`
-          : `${API_BASE}/guests/${personId}/ban`;
-        
-        const banData = {
-          reason: 'Ban removed',
-          isBanned: false
-        };
-        
-        console.log(`📤 Calling direct endpoint: ${directEndpoint}`);
-        await axios.put(directEndpoint, banData);
-        console.log('✅ Alternative approach successful');
-        
-        toast.success("Ban removed successfully");
-        fetchBanned();
-        fetchViolators();
-        fetchVisitLogs();
-        
-      } catch (secondError) {
-        console.error("❌ Alternative approach also failed:", secondError);
-        toast.error(`Failed to remove ban: ${error.response?.data?.message || error.message}`);
-      }
+      console.log('🔄 Removing violation from:', violationEndpoint);
+      await axios.put(violationEndpoint);
+      console.log('✅ Violation removed successfully');
+    } catch (violationError) {
+      // It's okay if violation removal fails - maybe there was no violation to remove
+      console.log('⚠️ No violation to remove or error removing violation:', violationError.message);
     }
-  };
-
-  // Export CSV function
+    
+    toast.success("Ban removed successfully");
+    
+    // Refresh both lists
+    fetchBanned();
+    fetchViolators();
+    fetchVisitLogs();
+    
+  } catch (error) {
+    console.error("❌ Error removing ban:", error);
+    console.error("📋 Error details:", error.response?.data);
+    toast.error(`Failed to remove ban: ${error.response?.data?.message || error.message}`);
+  }
+};
   const exportToCSV = () => {
     const headers = [
       'Visit Date', 'Type', 'Person ID', 'Person Name', 'Prisoner ID', 'Inmate Name', 'Visit Purpose',
@@ -731,11 +655,6 @@ const RecordVisits = () => {
     return timeString;
   };
 
-  // FIXED: Using pre-calculated counts from state
-  const getVisitorCount = () => counts.visitors;
-  const getGuestCount = () => counts.guests;
-
-  // FIXED: Properly aligned buttons with consistent styling
   const renderVisitTable = (data) => {
     if (data.length === 0) {
       return (
@@ -759,7 +678,7 @@ const RecordVisits = () => {
             )}
             <th>Time Details</th>
             <th>Status</th>
-            <th style={{ width: '200px' }}>Actions</th>
+            <th style={{ width: '180px' }}>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -821,52 +740,51 @@ const RecordVisits = () => {
                 )}
               </td>
               <td>
-                <div className="d-flex flex-column gap-2 align-items-stretch">
+                <div className="d-flex gap-2 justify-content-center flex-wrap">
                   <Button
                     variant="outline-primary"
                     size="sm"
                     onClick={() => openDetailsModal(log)}
-                    className="d-flex align-items-center justify-content-start w-100"
+                    title="View Details"
+                    className="p-1"
                   >
-                    <Eye size={14} className="me-2 flex-shrink-0" />
-                    <span className="text-nowrap">View Details</span>
+                    <Eye size={16} />
                   </Button>
                   <Button
                     variant="outline-warning"
                     size="sm"
                     onClick={() => openViolationModal(log)}
-                    className="d-flex align-items-center justify-content-start w-100"
+                    title="Add Violation"
+                    className="p-1"
                   >
-                    <AlertTriangle size={14} className="me-2 flex-shrink-0" />
-                    <span className="text-nowrap">Add Violation</span>
+                    <AlertTriangle size={16} />
                   </Button>
                   <Button
                     variant="outline-danger"
                     size="sm"
                     onClick={() => openBanModal(log)}
-                    className="d-flex align-items-center justify-content-start w-100"
+                    title="Ban Person"
+                    className="p-1"
                   >
-                    <Slash size={14} className="me-2 flex-shrink-0" />
-                    <span className="text-nowrap">Ban Person</span>
+                    <Slash size={16} />
                   </Button>
                   <Button
                     variant="outline-info"
                     size="sm"
                     onClick={() => handleClearTimeRecords(log)}
-                    className="d-flex align-items-center justify-content-start w-100"
-                    title="Clear time records (allow rescan for this date)"
+                    title="Reset Time Records"
+                    className="p-1"
                   >
-                    <RefreshCw size={14} className="me-2 flex-shrink-0" />
-                    <span className="text-nowrap">Reset Time</span>
+                    <RefreshCw size={16} />
                   </Button>
                   <Button
                     variant="outline-danger"
                     size="sm"
                     onClick={() => openDeleteModal(log)}
-                    className="d-flex align-items-center justify-content-start w-100"
+                    title="Delete Record"
+                    className="p-1"
                   >
-                    <Trash2 size={14} className="me-2 flex-shrink-0" />
-                    <span className="text-nowrap">Delete Record</span>
+                    <Trash2 size={16} />
                   </Button>
                 </div>
               </td>
@@ -895,7 +813,7 @@ const RecordVisits = () => {
             <th>Type</th>
             <th>Violation Type</th>
             <th>Violation Details</th>
-            <th style={{ width: '200px' }}>Actions</th>
+            <th style={{ width: '120px' }}>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -913,24 +831,24 @@ const RecordVisits = () => {
               </td>
               <td>{person.violationDetails || 'No details provided'}</td>
               <td>
-                <div className="d-flex flex-column gap-2 align-items-stretch">
+                <div className="d-flex gap-2 justify-content-center">
                   <Button
                     variant="outline-warning"
                     size="sm"
                     onClick={() => openEditViolationModal(person)}
-                    className="d-flex align-items-center justify-content-start w-100"
+                    title="Edit Violation"
+                    className="p-1"
                   >
-                    <Edit size={14} className="me-2 flex-shrink-0" />
-                    <span className="text-nowrap">Edit Violation</span>
+                    <Edit size={16} />
                   </Button>
                   <Button
                     variant="outline-success"
                     size="sm"
                     onClick={() => handleRemoveViolation(person.id, person.personType)}
-                    className="d-flex align-items-center justify-content-start w-100"
+                    title="Remove Violation"
+                    className="p-1"
                   >
-                    <CheckCircle size={14} className="me-2 flex-shrink-0" />
-                    <span className="text-nowrap">Remove Violation</span>
+                    <CheckCircle size={16} />
                   </Button>
                 </div>
               </td>
@@ -959,7 +877,7 @@ const RecordVisits = () => {
             <th>Type</th>
             <th>Ban Reason</th>
             <th>Ban Duration</th>
-            <th style={{ width: '200px' }}>Actions</th>
+            <th style={{ width: '120px' }}>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -979,24 +897,24 @@ const RecordVisits = () => {
                 </Badge>
               </td>
               <td>
-                <div className="d-flex flex-column gap-2 align-items-stretch">
+                <div className="d-flex gap-2 justify-content-center">
                   <Button
                     variant="outline-warning"
                     size="sm"
                     onClick={() => openEditBanModal(person)}
-                    className="d-flex align-items-center justify-content-start w-100"
+                    title="Edit Ban"
+                    className="p-1"
                   >
-                    <Edit size={14} className="me-2 flex-shrink-0" />
-                    <span className="text-nowrap">Edit Ban</span>
+                    <Edit size={16} />
                   </Button>
                   <Button
                     variant="outline-success"
                     size="sm"
                     onClick={() => handleRemoveBan(person.id, person.personType)}
-                    className="d-flex align-items-center justify-content-start w-100"
+                    title="Remove Ban"
+                    className="p-1"
                   >
-                    <CheckCircle size={14} className="me-2 flex-shrink-0" />
-                    <span className="text-nowrap">Remove Ban</span>
+                    <CheckCircle size={16} />
                   </Button>
                 </div>
               </td>
@@ -1039,7 +957,6 @@ const RecordVisits = () => {
             onSelect={(tab) => setActiveTab(tab)}
             className="mb-3"
           >
-            {/* FIXED: Using fixed counts from state that don't change when switching tabs */}
             <Tab eventKey="all" title={
               <span>
                 <Users size={16} className="me-1" />
@@ -1216,7 +1133,6 @@ const RecordVisits = () => {
         </Card>
       )}
 
-      {/* Rest of the modals remain the same... */}
       {/* View Details Modal */}
       <Modal show={showDetailsModal} onHide={() => setShowDetailsModal(false)} size="lg">
         <Modal.Header closeButton>

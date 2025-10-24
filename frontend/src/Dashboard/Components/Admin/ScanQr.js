@@ -1,24 +1,36 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Modal, Button, Card, Row, Col, Badge, Alert, Spinner, Image } from 'react-bootstrap';
+import { Modal, Button, Card, Row, Col, Badge, Alert, Spinner, Image, Form, Tab, Tabs, ProgressBar } from 'react-bootstrap';
 import axios from "axios";
-import { Printer, X, Check, XCircle, User } from 'react-feather';
+import { Printer, X, Check, XCircle, User, Camera, RefreshCw, Upload, FileText } from 'react-feather';
 import QrScanner from 'qr-scanner';
 
 const ScanQR = ({ show, onHide, onVisitUpdate }) => {
   const [scanner, setScanner] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
   const [scannedPerson, setScannedPerson] = useState(null);
-  const [showVisitorModal, setShowVisitorModal] = useState(false);
+  const [showPersonModal, setShowPersonModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [scanError, setScanError] = useState(null);
   const [isApproving, setIsApproving] = useState(false);
   const [lastScannedCode, setLastScannedCode] = useState('');
+  const [availableCameras, setAvailableCameras] = useState([]);
+  const [selectedCamera, setSelectedCamera] = useState('');
+  const [retryCount, setRetryCount] = useState(0);
+  const [scanConfidence, setScanConfidence] = useState(0);
+  const [isValidatingScan, setIsValidatingScan] = useState(false);
+  const [scanAttempts, setScanAttempts] = useState(0);
+  const [scanSuccess, setScanSuccess] = useState(false);
+  const [activeTab, setActiveTab] = useState('camera');
+  const [uploadedImage, setUploadedImage] = useState(null);
+  const [isProcessingUpload, setIsProcessingUpload] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  
   const scanTimeoutRef = useRef(null);
+  const validationTimeoutRef = useRef(null);
   const videoRef = useRef(null);
+  const fileInputRef = useRef(null);
 
-  const API_BASE = 'http://localhost:5000';
-
-  // Debounce scanning to prevent multiple rapid scans
+  // Enhanced debounce with validation
   const debounce = (func, wait) => {
     let timeout;
     return function executedFunction(...args) {
@@ -33,15 +45,26 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
 
   useEffect(() => {
     if (show) {
-      initializeScanner();
+      if (activeTab === 'camera') {
+        initializeScanner();
+      }
+      loadCameras();
       setScanError(null);
+      setRetryCount(0);
+      setScanConfidence(0);
+      setScanAttempts(0);
+      setScanSuccess(false);
     } else {
       stopScanner();
       setScannedPerson(null);
-      setShowVisitorModal(false);
+      setShowPersonModal(false);
       setScanError(null);
+      setUploadedImage(null);
       if (scanTimeoutRef.current) {
         clearTimeout(scanTimeoutRef.current);
+      }
+      if (validationTimeoutRef.current) {
+        clearTimeout(validationTimeoutRef.current);
       }
     }
 
@@ -50,8 +73,38 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       if (scanTimeoutRef.current) {
         clearTimeout(scanTimeoutRef.current);
       }
+      if (validationTimeoutRef.current) {
+        clearTimeout(validationTimeoutRef.current);
+      }
     };
-  }, [show]);
+  }, [show, activeTab]);
+
+  const loadCameras = async () => {
+    try {
+      const cameras = await QrScanner.listCameras();
+      setAvailableCameras(cameras);
+      if (cameras.length > 0) {
+        setSelectedCamera(cameras[0].id);
+      }
+    } catch (error) {
+      console.log('Cannot list cameras:', error);
+    }
+  };
+
+  const switchCamera = async (cameraId) => {
+    if (scanner) {
+      try {
+        await scanner.setCamera(cameraId);
+        setSelectedCamera(cameraId);
+        setRetryCount(0);
+        setScanConfidence(0);
+        setScanAttempts(0);
+      } catch (error) {
+        console.error('Error switching camera:', error);
+        setScanError('Failed to switch camera. Please try again.');
+      }
+    }
+  };
 
   const initializeScanner = async () => {
     try {
@@ -62,36 +115,54 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
         scanner.destroy();
       }
 
-      // Configure QR scanner with better settings
       const newScanner = new QrScanner(
         videoRef.current,
         (result) => {
-          handleScanResult(result.data);
+          handleScanResult(result);
         },
         {
           highlightScanRegion: true,
           highlightCodeOutline: true,
           returnDetailedScanResult: true,
-          maxScansPerSecond: 1, // Limit scans per second
+          maxScansPerSecond: 2,
           preferredCamera: 'environment',
+          
           calculateScanRegion: (video) => {
-            const size = Math.min(video.videoWidth, video.videoHeight) * 0.7;
+            const size = Math.min(video.videoWidth, video.videoHeight) * 0.8;
             return {
               x: (video.videoWidth - size) / 2,
               y: (video.videoHeight - size) / 2,
               width: size,
               height: size,
             };
-          }
+          },
+          
+          onDecodeError: (error) => {
+            if (retryCount < 10) {
+              setRetryCount(prev => prev + 1);
+            }
+          },
         }
       );
       
+      const cameras = await QrScanner.listCameras();
+      if (cameras.length > 0 && selectedCamera) {
+        await newScanner.setCamera(selectedCamera);
+      }
+      
       await newScanner.start();
+      
+      if (videoRef.current) {
+        videoRef.current.style.transform = 'scaleX(1)';
+        videoRef.current.style.webkitTransform = 'scaleX(1)';
+      }
+      
       setScanner(newScanner);
       setIsScanning(true);
+      setScanError(null);
     } catch (error) {
       console.error('Error initializing QR scanner:', error);
-      setScanError('Failed to initialize QR scanner. Please check camera permissions and ensure you have a camera available.');
+      setScanError('Failed to initialize camera. Please check camera permissions and ensure you have a camera available.');
     }
   };
 
@@ -104,8 +175,173 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     setIsScanning(false);
   };
 
-  // Debounced scan handler to prevent multiple rapid scans
-  const debouncedHandleScan = debounce(async (qrData) => {
+  const restartScanner = async () => {
+    stopScanner();
+    setRetryCount(0);
+    setScanConfidence(0);
+    setScanAttempts(0);
+    setScanError(null);
+    setScanSuccess(false);
+    await initializeScanner();
+  };
+
+  const validateScanResult = (result) => {
+    if (!result || !result.data) return false;
+    
+    const data = result.data.trim();
+    if (!data) return false;
+
+    try {
+      const parsed = JSON.parse(data);
+      if (parsed.id || parsed.visitorId) {
+        return true;
+      }
+    } catch (e) {
+      if (data.length >= 8 && data.length <= 50) {
+        return true;
+      }
+    }
+    
+    return false;
+  };
+
+  const handleScanResult = (result) => {
+    if (isLoading || isValidatingScan) return;
+
+    const confidence = result.cornerPoints ? 
+      Math.min(100, Math.max(10, Math.round((result.cornerPoints.length / 4) * 100))) : 50;
+
+    setScanConfidence(confidence);
+    setScanAttempts(prev => prev + 1);
+
+    if (confidence >= 60 && validateScanResult(result)) {
+      setIsValidatingScan(true);
+      setScanSuccess(true);
+      
+      validationTimeoutRef.current = setTimeout(() => {
+        debouncedHandleScan(result.data, confidence);
+      }, 800);
+    } else {
+      setScanError(`Low scan quality (${confidence}%). Hold steady and center the QR code.`);
+      
+      validationTimeoutRef.current = setTimeout(() => {
+        setScanError(null);
+        setIsValidatingScan(false);
+      }, 2000);
+    }
+  };
+
+  // Handle QR code image upload
+  const handleImageUpload = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setScanError('Please upload a valid image file (JPEG, PNG, etc.)');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setScanError('Image size should be less than 5MB');
+      return;
+    }
+
+    setUploadedImage(file);
+    setScanError(null);
+    processUploadedQRCode(file);
+  };
+
+  const processUploadedQRCode = async (file) => {
+    setIsProcessingUpload(true);
+    setUploadProgress(0);
+    setScanError(null);
+
+    try {
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => {
+          if (prev >= 90) {
+            clearInterval(progressInterval);
+            return 90;
+          }
+          return prev + 10;
+        });
+      }, 100);
+
+      const result = await QrScanner.scanImage(file, {
+        returnDetailedScanResult: true,
+        alsoTryWithoutScanRegion: true
+      });
+      
+      clearInterval(progressInterval);
+      setUploadProgress(100);
+
+      if (result && result.data) {
+        setScanSuccess(true);
+        setTimeout(() => {
+          debouncedHandleScan(result.data, 95);
+        }, 1000);
+      } else {
+        setScanError('No QR code found in the uploaded image. Please try another image.');
+        setIsProcessingUpload(false);
+        setUploadProgress(0);
+      }
+    } catch (scanError) {
+      console.error('QR scan error:', scanError);
+      setScanError('Failed to read QR code from image. Please ensure the image is clear and contains a valid QR code.');
+      setIsProcessingUpload(false);
+      setUploadProgress(0);
+    }
+  };
+
+  // Refresh person data to get complete details
+  const refreshPersonData = async (personId, personType) => {
+    try {
+      console.log('🔄 Refreshing person data for:', personId, personType);
+      const response = await axios.get(`http://localhost:5000/${personType}s/${personId}`);
+      console.log('✅ Refreshed person data:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Error refreshing person data:', error);
+      return null;
+    }
+  };
+
+  // Generate full name from individual name fields
+  const generateFullName = (person) => {
+    if (!person) return 'Unknown';
+    
+    // If fullName exists, use it
+    if (person.fullName) return person.fullName;
+    
+    // Otherwise generate from individual fields
+    const { lastName, firstName, middleName, extension } = person;
+    let fullName = `${lastName || ''}, ${firstName || ''}`;
+    if (middleName) fullName += ` ${middleName}`;
+    if (extension) fullName += ` ${extension}`;
+    
+    return fullName.trim() || 'Unknown Name';
+  };
+
+  // Detect if the scanned person is a guest or visitor
+  const detectPersonType = (qrData) => {
+    try {
+      const parsedData = JSON.parse(qrData);
+      if (parsedData.type === 'guest' || parsedData.visitPurpose || 
+          (parsedData.id && parsedData.id.startsWith('GST'))) {
+        return 'guest';
+      }
+      if (parsedData.prisonerId || parsedData.relationship ||
+          (parsedData.id && parsedData.id.startsWith('VIS'))) {
+        return 'visitor';
+      }
+    } catch (e) {
+      if (qrData.startsWith('GST')) return 'guest';
+      if (qrData.startsWith('VIS')) return 'visitor';
+    }
+    return 'visitor';
+  };
+
+  const debouncedHandleScan = debounce(async (qrData, confidence) => {
     if (isLoading || qrData === lastScannedCode) return;
     
     let personId;
@@ -115,219 +351,173 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       setIsLoading(true);
       setScanError(null);
       setLastScannedCode(qrData);
+      setRetryCount(0);
 
-      console.log('📱 QR Code Scanned:', qrData);
-
-      // Parse QR data to determine if it's a visitor or guest
       try {
         const parsedData = JSON.parse(qrData);
         personId = parsedData.id || parsedData.visitorId;
-        
-        // IMPROVED LOGIC: Check both type field and ID prefix
-        if (parsedData.type === 'guest') {
-          isGuest = true;
-        } else if (parsedData.type === 'visitor') {
-          isGuest = false;
-        } else if (parsedData.prisonerId) {
-          // Has prisonerId = visitor
-          isGuest = false;
-        } else if (personId && personId.startsWith('GST')) {
-          // ID starts with GST = guest
-          isGuest = true;
-        } else if (personId && personId.startsWith('VIS')) {
-          // ID starts with VIS = visitor  
-          isGuest = false;
-        } else {
-          // Fallback: check if it has visitPurpose (guest) or prisonerId (visitor)
-          isGuest = !!parsedData.visitPurpose && !parsedData.prisonerId;
-        }
+        isGuest = detectPersonType(qrData) === 'guest';
       } catch (e) {
-        // If not JSON, try to extract ID from string and determine by prefix
         personId = qrData;
-        if (personId.startsWith('GST')) {
-          isGuest = true;
-        } else if (personId.startsWith('VIS')) {
-          isGuest = false;
-        }
-        // If we can't determine, we'll try both endpoints
+        isGuest = detectPersonType(qrData) === 'guest';
       }
 
       if (!personId) {
-        setScanError('Invalid QR code format. Please ensure you are scanning a valid QR code.');
+        setScanError('Invalid QR code format.');
         setIsLoading(false);
+        setIsValidatingScan(false);
+        setScanSuccess(false);
+        setIsProcessingUpload(false);
+        setUploadProgress(0);
         return;
       }
 
-      console.log('🔍 Looking up person ID:', personId, 'isGuest:', isGuest);
-
-      // Get person data based on type - with fallback
-      let person;
-      try {
-        if (isGuest) {
-          const response = await axios.get(`${API_BASE}/guests/${personId}`);
-          person = response.data;
-        } else {
-          const response = await axios.get(`${API_BASE}/visitors/${personId}`);
-          person = response.data;
-        }
-      } catch (firstError) {
-        // If first attempt failed, try the opposite type
-        console.log('⚠️ First lookup failed, trying opposite type...');
-        try {
-          if (isGuest) {
-            // Tried guest first, now try visitor
-            const response = await axios.get(`${API_BASE}/visitors/${personId}`);
-            person = response.data;
-            isGuest = false; // Update type since we found it as visitor
-          } else {
-            // Tried visitor first, now try guest
-            const response = await axios.get(`${API_BASE}/guests/${personId}`);
-            person = response.data;
-            isGuest = true; // Update type since we found it as guest
-          }
-        } catch (secondError) {
-          // Both attempts failed
-          setScanError('Person not found in database. Please check the QR code.');
-          setIsLoading(false);
-          return;
-        }
-      }
-
-      if (!person) {
-        setScanError(`${isGuest ? 'Guest' : 'Visitor'} not found in database. Please check the QR code.`);
-        setIsLoading(false);
-        return;
-      }
-
-      const currentDate = new Date().toISOString().split('T')[0];
-      const personLastVisitDate = person.lastVisitDate ? 
-        new Date(person.lastVisitDate).toISOString().split('T')[0] : null;
-
-      let scanType = '';
-      let message = '';
-
-      console.log('🔍 Scan Analysis:', {
-        currentDate,
-        personLastVisitDate,
-        hasTimedIn: person.hasTimedIn,
-        hasTimedOut: person.hasTimedOut,
-        timeIn: person.timeIn,
-        timeOut: person.timeOut
-      });
-
-      // SCANNING LOGIC - UPDATED FOR VISIT LOGS
-      if (!person.hasTimedIn || personLastVisitDate !== currentDate) {
-        // NEW DAY or FIRST TIME IN - Reset for new visit
-        scanType = 'time_in_pending';
-        message = `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME IN REQUEST - New visit today`;
-      } else if (person.hasTimedIn && !person.hasTimedOut && personLastVisitDate === currentDate) {
-        // SAME DAY - Ready for time out
-        scanType = 'time_out_pending';
-        message = `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME OUT REQUEST - Complete today's visit`;
-      } else if (person.hasTimedIn && person.hasTimedOut && personLastVisitDate === currentDate) {
-        // ALREADY COMPLETED TODAY'S VISIT
-        scanType = 'completed';
-        message = `✅ You have already completed your visit today. Please come back tomorrow.`;
-      } else {
-        // FALLBACK - Start new visit
-        scanType = 'time_in_pending';
-        message = `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME IN REQUEST - Ready for new visit`;
-      }
-
-      // ALWAYS set scanned person and show modal
-      setScannedPerson({
-        ...person,
-        scanType: scanType,
-        scanMessage: message,
+      // Use the scan-process endpoint to get person data and scan type
+      const scanResponse = await axios.post("http://localhost:5000/scan-process", {
+        qrData: qrData,
+        personId: personId,
         isGuest: isGuest
       });
+
+      const scanResult = scanResponse.data;
+      console.log('📊 Scan process result:', scanResult);
+
+      if (!scanResult.person) {
+        setScanError(`${isGuest ? 'Guest' : 'Visitor'} not found in database.`);
+        setIsLoading(false);
+        setIsValidatingScan(false);
+        setScanSuccess(false);
+        setIsProcessingUpload(false);
+        setUploadProgress(0);
+        return;
+      }
+
+      // Refresh person data to ensure we have complete details
+      const completePersonData = await refreshPersonData(personId, isGuest ? 'guest' : 'visitor');
       
-      // STOP SCANNER and CLOSE SCANNER MODAL
-      stopScanner();
-      onHide();
+      // Generate full name if it doesn't exist
+      const personWithFullName = {
+        ...(completePersonData || scanResult.person),
+        fullName: generateFullName(completePersonData || scanResult.person)
+      };
+
+      // Set scanned person with complete data and scan type from backend
+      setScannedPerson({
+        ...personWithFullName,
+        personType: isGuest ? 'guest' : 'visitor',
+        scanType: scanResult.scanType,
+        scanMessage: scanResult.message,
+        scanConfidence: confidence
+      });
       
-      // Show visitor details modal
+      if (activeTab === 'camera') {
+        stopScanner();
+        onHide();
+      }
+      
       setTimeout(() => {
-        setShowVisitorModal(true);
+        setShowPersonModal(true);
+        setIsValidatingScan(false);
+        setScanSuccess(false);
+        setIsProcessingUpload(false);
+        setUploadProgress(0);
       }, 500);
 
     } catch (error) {
       console.error('❌ Error processing QR scan:', error);
+      let errorMessage = 'Failed to process QR code.';
+      
       if (error.response?.status === 404) {
-        setScanError('Person not found. Please check if the QR code is valid.');
-      } else {
-        setScanError('Failed to process QR code. Please try again.');
+        errorMessage = `${isGuest ? 'Guest' : 'Visitor'} not found in database.`;
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
       }
+      
+      setScanError(errorMessage);
+      setIsValidatingScan(false);
+      setScanSuccess(false);
+      setIsProcessingUpload(false);
+      setUploadProgress(0);
     } finally {
       setIsLoading(false);
     }
-  }, 1000); // 1 second debounce
+  }, 1000);
 
-  const handleScanResult = (qrData) => {
-    debouncedHandleScan(qrData);
+  const handleApproveVisit = async () => {
+    if (!scannedPerson) return;
+
+    try {
+      setIsApproving(true);
+      console.log('🔄 APPROVAL STARTED for:', scannedPerson.id, scannedPerson.scanType);
+      
+      const personType = scannedPerson.personType;
+      const endpoint = scannedPerson.scanType === 'time_in_pending' 
+        ? `http://localhost:5000/${personType}s/${scannedPerson.id}/approve-time-in`
+        : `http://localhost:5000/${personType}s/${scannedPerson.id}/approve-time-out`;
+
+      console.log('📞 Calling:', endpoint);
+
+      const response = await axios.put(endpoint);
+      console.log('✅ BACKEND RESPONSE:', response.data);
+
+      // REFRESH: Get complete person data after approval
+      const freshPersonData = await refreshPersonData(scannedPerson.id, personType);
+      
+      let updatedPersonData = freshPersonData || scannedPerson; // Fallback to original if refresh fails
+
+      // If refresh failed, try to extract from response
+      if (!freshPersonData) {
+        if (response.data.guest) {
+          updatedPersonData = response.data.guest;
+        } else if (response.data.visitor) {
+          updatedPersonData = response.data.visitor;
+        } else if (response.data[personType]) {
+          updatedPersonData = response.data[personType];
+        } else {
+          updatedPersonData = response.data;
+        }
+      }
+
+      // Generate full name for the updated data
+      const updatedPersonWithFullName = {
+        ...updatedPersonData,
+        fullName: generateFullName(updatedPersonData)
+      };
+
+      // FIXED: Proper merge with all original data preserved
+      const updatedPerson = {
+        ...scannedPerson, // Original complete data
+        ...updatedPersonWithFullName, // Updated fields from backend
+        // Ensure scan status is updated
+        scanType: scannedPerson.scanType === 'time_in_pending' ? 'time_in_approved' : 'time_out_approved',
+        scanMessage: response.data.message || 'Operation completed successfully',
+        // Preserve the scan confidence
+        scanConfidence: scannedPerson.scanConfidence
+      };
+
+      console.log('✅ FINAL UPDATED PERSON WITH COMPLETE DATA:', updatedPerson);
+      setScannedPerson(updatedPerson);
+      
+      if (onVisitUpdate) {
+        onVisitUpdate();
+      }
+
+    } catch (error) {
+      console.error('❌ APPROVAL ERROR:', error);
+      
+      const errorMessage = error.response?.data?.message || error.message || 'Operation failed';
+      
+      setScannedPerson({
+        ...scannedPerson,
+        scanType: 'error',
+        scanMessage: `❌ ${errorMessage}`
+      });
+    } finally {
+      setIsApproving(false);
+    }
   };
-
- const handleApproveVisit = async () => {
-  if (!scannedPerson) return;
-
-  try {
-    setIsApproving(true);
-    
-    let endpoint = '';
-    let successMessage = '';
-
-    // USE THE SPECIALIZED ENDPOINTS THAT CREATE VISIT LOGS
-    if (scannedPerson.scanType === 'time_in_pending') {
-      if (scannedPerson.isGuest) {
-        endpoint = `${API_BASE}/guests/${scannedPerson.id}/approve-time-in`;
-        successMessage = '✅ GUEST TIME IN APPROVED - Visit started';
-      } else {
-        endpoint = `${API_BASE}/visitors/${scannedPerson.id}/approve-time-in`;
-        successMessage = '✅ VISITOR TIME IN APPROVED - Timer started (3 hours)';
-      }
-    } else if (scannedPerson.scanType === 'time_out_pending') {
-      if (scannedPerson.isGuest) {
-        endpoint = `${API_BASE}/guests/${scannedPerson.id}/approve-time-out`;
-        successMessage = '✅ GUEST TIME OUT APPROVED - Visit completed';
-      } else {
-        endpoint = `${API_BASE}/visitors/${scannedPerson.id}/approve-time-out`;
-        successMessage = '✅ VISITOR TIME OUT APPROVED - Visit completed';
-      }
-    }
-
-    console.log('🔄 Calling approval endpoint:', endpoint);
-    
-    const response = await axios.put(endpoint);
-    console.log('✅ Approval response:', response.data);
-
-    // Update scanned person with success message
-    const successType = scannedPerson.scanType === 'time_in_pending' ? 'time_in_approved' : 'time_out_approved';
-    
-    const updatedPerson = {
-      ...(response.data.visitor || response.data.guest),
-      scanType: successType,
-      scanMessage: successMessage,
-      isGuest: scannedPerson.isGuest
-    };
-    
-    setScannedPerson(updatedPerson);
-
-    // Notify parent component about the update
-    if (onVisitUpdate) {
-      onVisitUpdate();
-    }
-
-  } catch (error) {
-    console.error('❌ Error approving visit:', error);
-    setScannedPerson({
-      ...scannedPerson,
-      scanType: 'error',
-      scanMessage: 'Failed to approve visit. Please try again. Error: ' + (error.response?.data?.message || error.message)
-    });
-  } finally {
-    setIsApproving(false);
-  }
-};
 
   const handleDeclineVisit = async () => {
     if (!scannedPerson) return;
@@ -335,16 +525,22 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     try {
       setIsApproving(true);
       
-      const endpoint = scannedPerson.isGuest 
-        ? `${API_BASE}/guests/${scannedPerson.id}`
-        : `${API_BASE}/visitors/${scannedPerson.id}`;
-      
-      await axios.put(endpoint, {
+      const personType = scannedPerson.personType;
+      await axios.put(`http://localhost:5000/${personType}s/${scannedPerson.id}`, {
         status: 'rejected'
       });
       
+      // Refresh data after decline
+      const freshPersonData = await refreshPersonData(scannedPerson.id, personType);
+      
+      // Generate full name for refreshed data
+      const personWithFullName = {
+        ...(freshPersonData || scannedPerson),
+        fullName: generateFullName(freshPersonData || scannedPerson)
+      };
+      
       setScannedPerson({
-        ...scannedPerson,
+        ...personWithFullName,
         scanType: 'declined',
         scanMessage: '❌ Visit request declined'
       });
@@ -361,16 +557,58 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     }
   };
 
-  const handleCloseVisitorModal = () => {
-    setShowVisitorModal(false);
+  const handleClosePersonModal = () => {
+    setShowPersonModal(false);
     setScannedPerson(null);
     setLastScannedCode('');
+    setRetryCount(0);
+    setScanConfidence(0);
+    setScanAttempts(0);
+    setScanSuccess(false);
+    setUploadedImage(null);
+    setIsProcessingUpload(false);
+    setUploadProgress(0);
   };
 
   const handleCloseScanner = () => {
     stopScanner();
     onHide();
     setLastScannedCode('');
+    setRetryCount(0);
+    setScanConfidence(0);
+    setScanAttempts(0);
+    setScanSuccess(false);
+    setUploadedImage(null);
+    setIsProcessingUpload(false);
+    setUploadProgress(0);
+    setActiveTab('camera');
+  };
+
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    setScanError(null);
+    setScanSuccess(false);
+    setUploadedImage(null);
+    setIsProcessingUpload(false);
+    setUploadProgress(0);
+    
+    if (tab === 'camera') {
+      initializeScanner();
+    } else {
+      stopScanner();
+    }
+  };
+
+  const triggerFileInput = () => {
+    fileInputRef.current?.click();
+  };
+
+  const clearUpload = () => {
+    setUploadedImage(null);
+    setScanError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   const calculateAge = (dateOfBirth) => {
@@ -390,6 +628,7 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       case 'approved': return 'success';
       case 'pending': return 'warning';
       case 'rejected': return 'danger';
+      case 'completed': return 'info';
       default: return 'secondary';
     }
   };
@@ -422,16 +661,13 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     return scannedPerson && (scannedPerson.scanType === 'time_in_approved' || scannedPerson.scanType === 'time_out_approved' || scannedPerson.scanType === 'completed' || scannedPerson.scanType === 'declined');
   };
 
-  // Format time display to 12-hour format
   const formatTimeDisplay = (timeString) => {
     if (!timeString) return 'Not recorded';
     
-    // If it's already in 12-hour format, return as is
     if (timeString.includes('AM') || timeString.includes('PM')) {
       return timeString;
     }
     
-    // Convert 24-hour format to 12-hour format
     if (timeString.includes(':')) {
       const [hours, minutes] = timeString.split(':');
       const hour = parseInt(hours);
@@ -443,91 +679,395 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     return timeString;
   };
 
+  // Render different content based on person type
+  const renderPersonDetails = () => {
+    if (!scannedPerson) return null;
+
+    const isGuest = scannedPerson.personType === 'guest';
+    const displayName = scannedPerson.fullName || generateFullName(scannedPerson);
+
+    return (
+      <>
+        <Alert variant={getScanAlertVariant(scannedPerson.scanType)} className="mb-4">
+          <strong>
+            {scannedPerson.scanType === 'time_in_pending' ? `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME IN REQUEST - AWAITING APPROVAL` : 
+             scannedPerson.scanType === 'time_out_pending' ? `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME OUT REQUEST - AWAITING APPROVAL` : 
+             scannedPerson.scanType === 'time_in_approved' ? `✅ ${isGuest ? 'GUEST' : 'VISITOR'} TIME IN APPROVED - ${isGuest ? 'VISIT STARTED' : 'TIMER STARTED'}` : 
+             scannedPerson.scanType === 'time_out_approved' ? `✅ ${isGuest ? 'GUEST' : 'VISITOR'} TIME OUT APPROVED - VISIT COMPLETED` : 
+             scannedPerson.scanType === 'completed' ? `✅ ${isGuest ? 'GUEST' : 'VISITOR'} VISIT COMPLETED TODAY` : 
+             scannedPerson.scanType === 'declined' ? `❌ ${isGuest ? 'GUEST' : 'VISITOR'} VISIT DECLINED` : 
+             '❌ SCAN ERROR'}
+          </strong>
+          <br />
+          {scannedPerson.scanMessage}
+          {scannedPerson.scanConfidence && (
+            <div className="mt-1">
+              <small>Scan Quality: <Badge bg="info">{scannedPerson.scanConfidence}%</Badge></small>
+            </div>
+          )}
+          {scannedPerson.scanType === 'time_in_approved' && !isGuest && (
+            <div className="mt-2">
+              <strong>⏰ Timer: 3 hours started</strong>
+            </div>
+          )}
+        </Alert>
+        
+        <Row className="mb-4">
+          <Col className="text-center">
+            <div className="mb-3">
+              {scannedPerson.photo ? (
+                <Image 
+                  src={`http://localhost:5000/uploads/${scannedPerson.photo}`} 
+                  alt={displayName}
+                  width={200}
+                  height={200}
+                  rounded
+                  style={{ 
+                    objectFit: 'cover',
+                    border: '4px solid #dee2e6',
+                    boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
+                  }}
+                  className="mb-2"
+                />
+              ) : (
+                <div 
+                  className="d-flex align-items-center justify-content-center bg-light rounded mx-auto"
+                  style={{ 
+                    width: 200, 
+                    height: 200,
+                    border: '4px solid #dee2e6'
+                  }}
+                >
+                  <User size={64} className="text-muted" />
+                </div>
+              )}
+            </div>
+            <h4 className="mb-1">{displayName}</h4>
+            <div>
+              <Badge bg={getStatusVariant(scannedPerson.status)} className="fs-6 me-2">
+                {scannedPerson.status?.toUpperCase()}
+              </Badge>
+              <Badge bg={isGuest ? 'info' : 'primary'} className="fs-6">
+                {isGuest ? 'GUEST' : 'VISITOR'}
+              </Badge>
+            </div>
+            <div className="mt-2">
+              <small className="text-muted">ID: {scannedPerson.id}</small>
+            </div>
+          </Col>
+        </Row>
+
+        <Row>
+          <Col md={12}>
+            <Card className="mb-4">
+              <Card.Header>
+                <strong>Time Tracking Information</strong>
+              </Card.Header>
+              <Card.Body>
+                <Row>
+                  <Col md={6}>
+                    <p><strong>Last Visit Date:</strong> {scannedPerson.lastVisitDate ? new Date(scannedPerson.lastVisitDate).toLocaleDateString() : 'No previous visits'}</p>
+                    <p><strong>Time In:</strong> {scannedPerson.timeIn ? <Badge bg="success" className="fs-6">{formatTimeDisplay(scannedPerson.timeIn)}</Badge> : 'Not recorded'}</p>
+                    <p><strong>Date Visited:</strong> {scannedPerson.dateVisited ? new Date(scannedPerson.dateVisited).toLocaleDateString() : 'N/A'}</p>
+                  </Col>
+                  <Col md={6}>
+                    <p><strong>Time Out:</strong> {scannedPerson.timeOut ? <Badge bg="info" className="fs-6">{formatTimeDisplay(scannedPerson.timeOut)}</Badge> : 'Not recorded'}</p>
+                    <p><strong>Time Status:</strong> <Badge bg={getTimeStatus(scannedPerson).variant} className="fs-6">{getTimeStatus(scannedPerson).text}</Badge></p>
+                    {!isGuest && scannedPerson.isTimerActive && (
+                      <p><strong>Timer Active:</strong> <Badge bg="warning" className="fs-6">YES</Badge></p>
+                    )}
+                  </Col>
+                </Row>
+              </Card.Body>
+            </Card>
+          </Col>
+
+          <Col md={6}>
+            <Card className="mb-3">
+              <Card.Header>
+                <strong>Personal Information</strong>
+              </Card.Header>
+              <Card.Body>
+                <p><strong>Full Name:</strong> {displayName}</p>
+                <p><strong>Gender:</strong> {scannedPerson.sex}</p>
+                <p><strong>Date of Birth:</strong> {scannedPerson.dateOfBirth ? new Date(scannedPerson.dateOfBirth).toLocaleDateString() : 'N/A'}</p>
+                <p><strong>Age:</strong> {calculateAge(scannedPerson.dateOfBirth)}</p>
+                <p><strong>Address:</strong> {scannedPerson.address}</p>
+                <p><strong>Contact:</strong> {scannedPerson.contact || 'N/A'}</p>
+              </Card.Body>
+            </Card>
+          </Col>
+          
+          <Col md={6}>
+            <Card className="mb-3">
+              <Card.Header>
+                <strong>{isGuest ? 'Guest Details' : 'Visit Details'}</strong>
+              </Card.Header>
+              <Card.Body>
+                {isGuest ? (
+                  <>
+                    <p><strong>Visit Purpose:</strong> {scannedPerson.visitPurpose}</p>
+                    <p><strong>Created At:</strong> {scannedPerson.createdAt ? new Date(scannedPerson.createdAt).toLocaleString() : 'N/A'}</p>
+                  </>
+                ) : (
+                  <>
+                    <p><strong>Prisoner ID:</strong> {scannedPerson.prisonerId}</p>
+                    <p><strong>Relationship:</strong> {scannedPerson.relationship}</p>
+                    <p><strong>Visit Approved:</strong> {scannedPerson.visitApproved ? 'Yes' : 'No'}</p>
+                  </>
+                )}
+              </Card.Body>
+            </Card>
+            
+            {scannedPerson.violationType && (
+              <Card className="mb-3 border-danger">
+                <Card.Header className="bg-danger text-white">
+                  <strong>Violation Information</strong>
+                </Card.Header>
+                <Card.Body>
+                  <p><strong>Violation Type:</strong> {scannedPerson.violationType}</p>
+                  <p><strong>Violation Details:</strong> {scannedPerson.violationDetails || 'No violation data'}</p>
+                </Card.Body>
+              </Card>
+            )}
+
+            {scannedPerson.isBanned && (
+              <Card className="mb-3 border-warning">
+                <Card.Header className="bg-warning text-dark">
+                  <strong>Ban Information</strong>
+                </Card.Header>
+                <Card.Body>
+                  <p><strong>Ban Reason:</strong> {scannedPerson.banReason}</p>
+                  <p><strong>Ban Duration:</strong> {scannedPerson.banDuration}</p>
+                  <p><strong>Ban Notes:</strong> {scannedPerson.banNotes || 'No additional notes'}</p>
+                </Card.Body>
+              </Card>
+            )}
+          </Col>
+        </Row>
+      </>
+    );
+  };
+
   return (
     <>
-      {/* QR Scanner Modal */}
       <Modal show={show} onHide={handleCloseScanner} size="lg" centered backdrop="static">
         <Modal.Header closeButton>
-          <Modal.Title>Scan QR Code</Modal.Title>
+          <Modal.Title>
+            <Camera size={20} className="me-2" />
+            Scan QR Code (Visitors & Guests)
+          </Modal.Title>
         </Modal.Header>
         <Modal.Body className="text-center">
-          <div className="mb-3">
-            <p className="text-muted">
-              Position the QR code within the camera view. Hold steady for 1-2 seconds for accurate scanning.
-            </p>
-          </div>
-          
-          {scanError && (
-            <Alert variant="danger" className="mb-3">
-              <strong>Scan Error:</strong> {scanError}
-            </Alert>
-          )}
-          
-          <div style={{ position: 'relative', maxWidth: '100%', margin: '0 auto' }}>
-            <video 
-              ref={videoRef}
-              id="qr-video"
-              style={{
-                width: '100%',
-                maxWidth: '500px',
-                height: 'auto',
-                border: '2px solid #dee2e6',
-                borderRadius: '8px',
-                backgroundColor: '#f8f9fa'
-              }}
-            ></video>
-            
-            {/* Scanning overlay */}
-            <div style={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              width: '200px',
-              height: '200px',
-              border: '2px solid #007bff',
-              borderRadius: '8px',
-              pointerEvents: 'none'
-            }}></div>
-            
-            {isLoading && (
-              <div style={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                padding: '20px',
-                borderRadius: '8px',
-                zIndex: 10
-              }}>
-                <Spinner animation="border" role="status" variant="primary">
-                  <span className="visually-hidden">Processing scan...</span>
-                </Spinner>
-                <div className="mt-2">Processing scan...</div>
+          <Tabs activeKey={activeTab} onSelect={handleTabChange} className="mb-3" justify>
+            <Tab eventKey="camera" title={<span><Camera size={16} className="me-1" />Camera Scan</span>}>
+              <div className="mb-3">
+                <p className="text-muted">Point camera at QR code to scan</p>
               </div>
-            )}
-          </div>
-          
-          <div className="mt-3">
-            <Badge bg={isScanning ? 'success' : 'warning'}>
-              {isScanning ? 'Scanner Active - Ready to Scan' : 'Scanner Inactive'}
-            </Badge>
-          </div>
+              
+              {scanError && (
+                <Alert variant="danger" className="mb-3">
+                  {scanError}
+                </Alert>
+              )}
 
-          <Card className="mt-3 bg-light">
-            <Card.Body className="p-2">
-              <small>
-                <strong>Scanning Tips:</strong> 
-                <br/>• Ensure good lighting
-                <br/>• Hold QR code steady inside the blue frame
-                <br/>• Keep the QR code flat and clearly visible
-                <br/>• Avoid glare and reflections
-              </small>
-            </Card.Body>
-          </Card>
+              {scanSuccess && (
+                <Alert variant="success" className="mb-3">
+                  <strong>✅ QR Code Detected!</strong> Processing information...
+                </Alert>
+              )}
+              
+              <div style={{ position: 'relative', maxWidth: '100%', margin: '0 auto' }}>
+                <video 
+                  ref={videoRef}
+                  style={{
+                    width: '100%',
+                    maxWidth: '400px',
+                    height: '300px',
+                    border: scanSuccess ? '3px solid #28a745' : '2px solid #dee2e6',
+                    borderRadius: '8px',
+                    backgroundColor: '#000',
+                    transform: 'scaleX(1)',
+                    WebkitTransform: 'scaleX(1)',
+                  }}
+                ></video>
+                
+                <div style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  width: '250px',
+                  height: '250px',
+                  border: scanConfidence >= 60 ? '3px solid #28a745' : '3px solid #ffc107',
+                  borderRadius: '12px',
+                  pointerEvents: 'none',
+                  boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.4)',
+                }}></div>
+
+                {(isLoading || isValidatingScan) && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                    padding: '20px',
+                    borderRadius: '8px',
+                    zIndex: 10,
+                    color: 'white',
+                    textAlign: 'center'
+                  }}>
+                    <Spinner animation="border" role="status" variant="light">
+                      <span className="visually-hidden">Processing scan...</span>
+                    </Spinner>
+                    <div className="mt-2">
+                      {isValidatingScan ? 'Validating QR code...' : 'Processing data...'}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-3">
+                <Badge bg={isScanning ? (scanSuccess ? 'success' : 'primary') : 'warning'}>
+                  {isScanning ? 
+                    (scanSuccess ? '✅ QR Validated - Processing...' : 'Scanner Active - Ready to Scan') : 
+                    'Scanner Inactive'}
+                </Badge>
+              </div>
+            </Tab>
+
+            <Tab eventKey="upload" title={<span><Upload size={16} className="me-1" />Upload QR Image</span>}>
+              <div className="mb-3">
+                <p className="text-muted">Upload an image containing a QR code</p>
+              </div>
+
+              {scanError && (
+                <Alert variant="danger" className="mb-3">
+                  {scanError}
+                </Alert>
+              )}
+
+              <div className="text-center">
+                <Card 
+                  className={`border-2 ${uploadedImage ? 'border-success' : isProcessingUpload ? 'border-primary' : 'border-dashed'} mb-3`}
+                  style={{ 
+                    cursor: isProcessingUpload ? 'default' : 'pointer',
+                    borderStyle: uploadedImage || isProcessingUpload ? 'solid' : 'dashed',
+                  }}
+                  onClick={isProcessingUpload ? undefined : triggerFileInput}
+                >
+                  <Card.Body className="py-5">
+                    {isProcessingUpload ? (
+                      <div className="text-center">
+                        <Spinner animation="border" variant="primary" />
+                        <div className="mt-2">
+                          <strong>Processing Image...</strong>
+                        </div>
+                        {uploadProgress > 0 && (
+                          <>
+                            <ProgressBar 
+                              now={uploadProgress} 
+                              className="mt-2" 
+                              style={{ height: '8px' }}
+                              variant="success"
+                            />
+                            <small className="text-muted mt-1 d-block">
+                              {uploadProgress}% Complete
+                            </small>
+                          </>
+                        )}
+                      </div>
+                    ) : uploadedImage ? (
+                      <div className="text-success">
+                        <FileText size={48} className="mb-2" />
+                        <div>
+                          <strong>Image Selected</strong>
+                        </div>
+                        <small className="text-muted d-block">
+                          {uploadedImage.name}
+                        </small>
+                      </div>
+                    ) : (
+                      <div>
+                        <Upload size={48} className="text-muted mb-2" />
+                        <div>
+                          <strong>Click to Upload QR Image</strong>
+                        </div>
+                        <small className="text-muted">
+                          Supports JPG, PNG, GIF (Max 5MB)
+                        </small>
+                      </div>
+                    )}
+                  </Card.Body>
+                </Card>
+
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleImageUpload}
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                />
+
+                <div className="d-grid gap-2 d-md-flex justify-content-md-center">
+                  {!isProcessingUpload && (
+                    <>
+                      <Button
+                        variant={uploadedImage ? "outline-primary" : "primary"}
+                        onClick={triggerFileInput}
+                        className="me-md-2"
+                      >
+                        <Upload size={16} className="me-1" />
+                        {uploadedImage ? 'Change Image' : 'Select Image'}
+                      </Button>
+                      
+                      {uploadedImage && (
+                        <Button
+                          variant="success"
+                          onClick={() => processUploadedQRCode(uploadedImage)}
+                        >
+                          <Check size={16} className="me-1" />
+                          Process QR Code
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            </Tab>
+          </Tabs>
         </Modal.Body>
         <Modal.Footer>
+          {activeTab === 'camera' && (
+            <div className="d-flex flex-wrap gap-2 align-items-center">
+              {availableCameras.length > 1 && (
+                <Form.Select 
+                  value={selectedCamera} 
+                  onChange={(e) => switchCamera(e.target.value)}
+                  style={{ width: 'auto' }}
+                  size="sm"
+                >
+                  {availableCameras.map(camera => (
+                    <option key={camera.id} value={camera.id}>
+                      {camera.label}
+                    </option>
+                  ))}
+                </Form.Select>
+              )}
+              
+              <Button 
+                variant="outline-primary" 
+                size="sm" 
+                onClick={restartScanner}
+                disabled={isLoading || isValidatingScan}
+              >
+                <RefreshCw size={14} className="me-1" />
+                Restart Scanner
+              </Button>
+            </div>
+          )}
+          
           <Button variant="secondary" onClick={handleCloseScanner}>
             <X size={16} className="me-1" />
             Close Scanner
@@ -535,162 +1075,17 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
         </Modal.Footer>
       </Modal>
 
-      {/* Person Details Modal with Approval */}
-      <Modal show={showVisitorModal} onHide={handleCloseVisitorModal} size="xl" centered>
-        <Modal.Header closeButton className="bg-light">
-          <Modal.Title className="d-flex align-items-center">
-            <User size={24} className="me-2" />
-            {scannedPerson?.isGuest ? 'Guest' : 'Visitor'} Scan Details - {scannedPerson?.id} 
-            <Badge bg={getScanAlertVariant(scannedPerson?.scanType)} className="ms-2 fs-6">
+      <Modal show={showPersonModal} onHide={handleClosePersonModal} size="xl" centered>
+        <Modal.Header closeButton>
+          <Modal.Title>
+            {scannedPerson?.personType === 'guest' ? 'Guest' : 'Visitor'} Scan Details - {scannedPerson?.id} 
+            <Badge bg={getScanAlertVariant(scannedPerson?.scanType)} className="ms-2">
               {scannedPerson?.scanType?.replace(/_/g, ' ').toUpperCase() || 'SCAN'}
             </Badge>
           </Modal.Title>
         </Modal.Header>
-        <Modal.Body style={{ maxHeight: '80vh', overflowY: 'auto' }}>
-          {scannedPerson && (
-            <>
-              <Alert variant={getScanAlertVariant(scannedPerson.scanType)} className="mb-4">
-                <div className="d-flex align-items-center">
-                  <div className="flex-grow-1">
-                    <h5 className="alert-heading mb-2">
-                      {scannedPerson.scanType === 'time_in_pending' ? '🕒 TIME IN REQUEST - AWAITING APPROVAL' : 
-                       scannedPerson.scanType === 'time_out_pending' ? '🕒 TIME OUT REQUEST - AWAITING APPROVAL' : 
-                       scannedPerson.scanType === 'time_in_approved' ? '✅ TIME IN APPROVED - TIMER STARTED' : 
-                       scannedPerson.scanType === 'time_out_approved' ? '✅ TIME OUT APPROVED - VISIT COMPLETED' : 
-                       scannedPerson.scanType === 'completed' ? '✅ VISIT COMPLETED TODAY' : 
-                       scannedPerson.scanType === 'declined' ? '❌ VISIT DECLINED' : 
-                       '❌ SCAN ERROR'}
-                    </h5>
-                    <p className="mb-0">{scannedPerson.scanMessage}</p>
-                    {scannedPerson.scanType === 'time_in_approved' && !scannedPerson.isGuest && (
-                      <div className="mt-2">
-                        <strong>⏰ Timer: 3 hours started</strong>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </Alert>
-              
-              <Row>
-                {/* Person Photo - Larger and Centered */}
-                <Col md={4}>
-                  <Card className="mb-4">
-                    <Card.Header className="text-center">
-                      <strong>{scannedPerson.isGuest ? 'Guest' : 'Visitor'} Identification</strong>
-                    </Card.Header>
-                    <Card.Body className="text-center">
-                      {scannedPerson.photo ? (
-                        <Image 
-                          src={`http://localhost:5000/uploads/${scannedPerson.photo}`} 
-                          alt={scannedPerson.fullName}
-                          width={280}
-                          height={280}
-                          rounded
-                          style={{ 
-                            objectFit: 'cover',
-                            border: '3px solid #dee2e6'
-                          }}
-                          className="mb-3"
-                        />
-                      ) : (
-                        <div 
-                          className="d-flex align-items-center justify-content-center bg-light rounded mx-auto"
-                          style={{ width: 280, height: 280 }}
-                        >
-                          <User size={64} className="text-muted" />
-                        </div>
-                      )}
-                      <h5 className="mt-2">{scannedPerson.fullName}</h5>
-                      <Badge bg={getStatusVariant(scannedPerson.status)} className="fs-6">
-                        {scannedPerson.status.toUpperCase()}
-                      </Badge>
-                      <div className="mt-2">
-                        <Badge bg={scannedPerson.isGuest ? 'info' : 'primary'} className="fs-6">
-                          {scannedPerson.isGuest ? 'GUEST' : 'VISITOR'}
-                        </Badge>
-                      </div>
-                    </Card.Body>
-                  </Card>
-                </Col>
-
-                <Col md={8}>
-                  <Row>
-                    <Col md={12}>
-                      <Card className="mb-4">
-                        <Card.Header>
-                          <strong>Time Tracking Information</strong>
-                        </Card.Header>
-                        <Card.Body>
-                          <Row>
-                            <Col md={6}>
-                              <p><strong>Last Visit Date:</strong> {scannedPerson.lastVisitDate ? new Date(scannedPerson.lastVisitDate).toLocaleDateString() : 'No previous visits'}</p>
-                              <p><strong>Time In:</strong> {scannedPerson.timeIn ? <Badge bg="success" className="fs-6">{formatTimeDisplay(scannedPerson.timeIn)}</Badge> : 'Not recorded'}</p>
-                            </Col>
-                            <Col md={6}>
-                              <p><strong>Time Out:</strong> {scannedPerson.timeOut ? <Badge bg="info" className="fs-6">{formatTimeDisplay(scannedPerson.timeOut)}</Badge> : 'Not recorded'}</p>
-                              <p><strong>Time Status:</strong> <Badge bg={getTimeStatus(scannedPerson).variant} className="fs-6">{getTimeStatus(scannedPerson).text}</Badge></p>
-                            </Col>
-                          </Row>
-                        </Card.Body>
-                      </Card>
-                    </Col>
-
-                    <Col md={6}>
-                      <Card className="mb-3">
-                        <Card.Header>
-                          <strong>Personal Information</strong>
-                        </Card.Header>
-                        <Card.Body>
-                          <p><strong>Gender:</strong> {scannedPerson.sex}</p>
-                          <p><strong>Date of Birth:</strong> {scannedPerson.dateOfBirth ? new Date(scannedPerson.dateOfBirth).toLocaleDateString() : 'N/A'}</p>
-                          <p><strong>Age:</strong> {calculateAge(scannedPerson.dateOfBirth)}</p>
-                          <p><strong>Address:</strong> {scannedPerson.address}</p>
-                          <p><strong>Contact:</strong> {scannedPerson.contact || 'N/A'}</p>
-                        </Card.Body>
-                      </Card>
-                    </Col>
-                    
-                    <Col md={6}>
-                      {scannedPerson.isGuest ? (
-                        <Card className="mb-3">
-                          <Card.Header>
-                            <strong>Guest Details</strong>
-                          </Card.Header>
-                          <Card.Body>
-                            <p><strong>Visit Purpose:</strong> {scannedPerson.visitPurpose}</p>
-                            <p><strong>Type:</strong> <Badge bg="info">GUEST</Badge></p>
-                          </Card.Body>
-                        </Card>
-                      ) : (
-                        <Card className="mb-3">
-                          <Card.Header>
-                            <strong>Visit Details</strong>
-                          </Card.Header>
-                          <Card.Body>
-                            <p><strong>Prisoner ID:</strong> {scannedPerson.prisonerId}</p>
-                            <p><strong>Relationship:</strong> {scannedPerson.relationship}</p>
-                            <p><strong>Type:</strong> <Badge bg="primary">VISITOR</Badge></p>
-                          </Card.Body>
-                        </Card>
-                      )}
-                      
-                      {scannedPerson.violationType && (
-                        <Card className="mb-3 border-danger">
-                          <Card.Header className="bg-danger text-white">
-                            <strong>Violation Information</strong>
-                          </Card.Header>
-                          <Card.Body>
-                            <p><strong>Violation Type:</strong> {scannedPerson.violationType}</p>
-                            <p><strong>Violation Details:</strong> {scannedPerson.violationDetails || 'No violation data'}</p>
-                          </Card.Body>
-                        </Card>
-                      )}
-                    </Col>
-                  </Row>
-                </Col>
-              </Row>
-            </>
-          )}
+        <Modal.Body>
+          {renderPersonDetails()}
         </Modal.Body>
         <Modal.Footer>
           {showApprovalButtons() && (
@@ -701,8 +1096,8 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
                 disabled={isApproving}
                 size="lg"
               >
-                <XCircle size={20} className="me-2" />
-                {isApproving ? 'Declining...' : 'Decline Visit'}
+                <XCircle size={18} className="me-1" />
+                {isApproving ? 'Declining...' : 'Decline'}
               </Button>
               <Button 
                 variant="success" 
@@ -710,13 +1105,13 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
                 disabled={isApproving}
                 size="lg"
               >
-                <Check size={20} className="me-2" />
-                {isApproving ? 'Approving...' : 'Approve Visit'}
+                <Check size={18} className="me-1" />
+                {isApproving ? 'Approving...' : 'Approve'}
               </Button>
             </>
           )}
           {showCompletedMessage() && (
-            <Button variant="secondary" onClick={handleCloseVisitorModal} size="lg">
+            <Button variant="secondary" onClick={handleClosePersonModal} size="lg">
               Close
             </Button>
           )}

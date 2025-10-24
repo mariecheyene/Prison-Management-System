@@ -635,7 +635,7 @@ const Guest = () => {
             👤 Guests Management
           </h2>
           <Badge bg="info" className="mb-2">
-            All Guests - No Status Filtering
+            Admin Access
           </Badge>
         </div>
         <div className="d-flex gap-2">
@@ -681,7 +681,7 @@ const Guest = () => {
             </Col>
             <Col md={4}>
               <div className="text-muted small">
-                {filteredGuests.length} guests found (showing all statuses)
+                {filteredGuests.length} guests found 
               </div>
             </Col>
           </Row>

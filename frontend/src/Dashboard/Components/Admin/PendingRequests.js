@@ -1,142 +1,176 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Container, Row, Col, Table, Button, Modal, Form, 
-  Alert, Badge, Spinner, InputGroup, Card
+  Alert, Badge, Spinner, InputGroup, Card, ButtonGroup,
+  Tabs, Tab
 } from 'react-bootstrap';
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import axios from "axios";
 import { 
   Search, 
-  Eye, 
-  Check,
-  X,
-  Clock
+  Check, 
+  X, 
+  Eye,
+  User,
+  Clock,
+  Filter,
+  Users,
+  UserCheck
 } from 'react-feather';
 
 const PendingRequests = () => {
+  const [pendingVisitors, setPendingVisitors] = useState([]);
   const [pendingGuests, setPendingGuests] = useState([]);
-  const [filteredPendingGuests, setFilteredPendingGuests] = useState([]);
-  const [showViewModal, setShowViewModal] = useState(false);
-  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [filteredVisitors, setFilteredVisitors] = useState([]);
+  const [filteredGuests, setFilteredGuests] = useState([]);
+  const [showModal, setShowModal] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
-  const [selectedGuest, setSelectedGuest] = useState(null);
+  const [selectedRequest, setSelectedRequest] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchBy, setSearchBy] = useState('lastName');
+  const [stats, setStats] = useState({ 
+    pendingVisitors: 0, 
+    pendingGuests: 0, 
+    totalPending: 0 
+  });
   const [rejectionReason, setRejectionReason] = useState('');
-
-  const searchOptions = [
-    { value: 'lastName', label: 'Last Name' },
-    { value: 'firstName', label: 'First Name' },
-    { value: 'id', label: 'Request ID' },
-    { value: 'visitPurpose', label: 'Visit Purpose' }
-  ];
+  const [activeTab, setActiveTab] = useState('visitors');
 
   useEffect(() => {
-    fetchPendingGuests();
+    fetchPendingRequests();
+    fetchStats();
   }, []);
 
   useEffect(() => {
-    filterPendingGuests();
-  }, [searchQuery, searchBy, pendingGuests]);
+    filterRequests();
+  }, [searchQuery, pendingVisitors, pendingGuests, activeTab]);
 
-  const fetchPendingGuests = async () => {
+  const fetchPendingRequests = async () => {
     setIsLoading(true);
     try {
-      const response = await axios.get("http://localhost:5000/pending-guests");
-      // Filter only pending requests
-      const pendingOnly = response.data.filter(guest => guest.status === 'pending');
-      setPendingGuests(pendingOnly);
+      const [visitorsResponse, guestsResponse] = await Promise.all([
+        axios.get("http://localhost:5000/pending-visitors"),
+        axios.get("http://localhost:5000/pending-guests")
+      ]);
+      setPendingVisitors(visitorsResponse.data);
+      setPendingGuests(guestsResponse.data);
     } catch (error) {
-      console.error("Error fetching pending guests:", error);
+      console.error("Error fetching pending requests:", error);
       toast.error("Failed to fetch pending requests");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const filterPendingGuests = () => {
+  const fetchStats = async () => {
+    try {
+      const [visitorsStats, guestsStats] = await Promise.all([
+        axios.get("http://localhost:5000/pending-visitors/stats"),
+        axios.get("http://localhost:5000/pending-guests/stats")
+      ]);
+      
+      setStats({
+        pendingVisitors: visitorsStats.data.pending,
+        pendingGuests: guestsStats.data.pending,
+        totalPending: visitorsStats.data.pending + guestsStats.data.pending
+      });
+    } catch (error) {
+      console.error("Error fetching stats:", error);
+    }
+  };
+
+  const filterRequests = () => {
     if (!searchQuery.trim()) {
-      setFilteredPendingGuests(pendingGuests);
+      setFilteredVisitors(pendingVisitors);
+      setFilteredGuests(pendingGuests);
       return;
     }
 
-    const filtered = pendingGuests.filter(guest => {
-      const query = searchQuery.toLowerCase();
-      const value = guest[searchBy]?.toString().toLowerCase() || '';
-      return value.includes(query);
-    });
+    const query = searchQuery.toLowerCase();
     
-    setFilteredPendingGuests(filtered);
-  };
-
-  const handleView = (guest) => {
-    setSelectedGuest(guest);
-    setShowViewModal(true);
-  };
-
-  const handleApprove = (guest) => {
-    setSelectedGuest(guest);
-    setShowApproveModal(true);
-  };
-
-  const handleReject = (guest) => {
-    setSelectedGuest(guest);
-    setRejectionReason('');
-    setShowRejectModal(true);
-  };
-
-  const approveGuest = async () => {
-    if (!selectedGuest) return;
-
-    setIsLoading(true);
-    try {
-      // Get admin user ID from your auth context or localStorage
-      const adminUserId = localStorage.getItem('userId') || 'admin-user-id';
-
-      const response = await axios.put(`http://localhost:5000/pending-guests/${selectedGuest.id}/approve`, {
-        approvedBy: adminUserId
+    if (activeTab === 'visitors') {
+      const filtered = pendingVisitors.filter(visitor => {
+        return (
+          visitor.lastName?.toLowerCase().includes(query) ||
+          visitor.firstName?.toLowerCase().includes(query) ||
+          visitor.id?.toLowerCase().includes(query) ||
+          visitor.prisonerId?.toLowerCase().includes(query)
+        );
       });
+      setFilteredVisitors(filtered);
+    } else {
+      const filtered = pendingGuests.filter(guest => {
+        return (
+          guest.lastName?.toLowerCase().includes(query) ||
+          guest.firstName?.toLowerCase().includes(query) ||
+          guest.id?.toLowerCase().includes(query) ||
+          guest.visitPurpose?.toLowerCase().includes(query)
+        );
+      });
+      setFilteredGuests(filtered);
+    }
+  };
 
-      toast.success('Guest approved successfully! QR code generated.');
-      setShowApproveModal(false);
-      fetchPendingGuests(); // Refresh the list
+  const handleView = (request, type) => {
+    setSelectedRequest({ ...request, type });
+    setShowModal(true);
+  };
+
+  const handleApprove = async (requestId, type) => {
+    try {
+      setIsLoading(true);
+      let response;
+      
+      if (type === 'visitor') {
+        response = await axios.post(`http://localhost:5000/pending-visitors/${requestId}/approve`);
+        toast.success('Visitor approved successfully!');
+      } else {
+        response = await axios.post(`http://localhost:5000/pending-guests/${requestId}/approve`);
+        toast.success('Guest approved successfully!');
+      }
+      
+      fetchPendingRequests();
+      fetchStats();
     } catch (error) {
-      console.error('Error approving guest:', error);
-      const errorMessage = error.response?.data?.message || 'Failed to approve guest';
-      toast.error(errorMessage);
+      console.error("Error approving request:", error);
+      toast.error(error.response?.data?.message || `Failed to approve ${type}`);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const rejectGuest = async () => {
-    if (!selectedGuest || !rejectionReason.trim()) {
-      toast.error('Please provide a rejection reason');
-      return;
-    }
-
-    setIsLoading(true);
+  const handleReject = async (requestId, type) => {
     try {
-      const adminUserId = localStorage.getItem('userId') || 'admin-user-id';
-
-      await axios.put(`http://localhost:5000/pending-guests/${selectedGuest.id}/reject`, {
-        rejectedBy: adminUserId,
-        rejectionReason: rejectionReason
-      });
-
-      toast.success('Guest request rejected successfully!');
+      setIsLoading(true);
+      
+      if (type === 'visitor') {
+        await axios.post(`http://localhost:5000/pending-visitors/${requestId}/reject`, {
+          rejectionReason
+        });
+        toast.success('Visitor rejected successfully!');
+      } else {
+        await axios.post(`http://localhost:5000/pending-guests/${requestId}/reject`, {
+          rejectionReason
+        });
+        toast.success('Guest rejected successfully!');
+      }
+      
       setShowRejectModal(false);
       setRejectionReason('');
-      fetchPendingGuests(); // Refresh the list
+      fetchPendingRequests();
+      fetchStats();
     } catch (error) {
-      console.error('Error rejecting guest:', error);
-      const errorMessage = error.response?.data?.message || 'Failed to reject guest';
-      toast.error(errorMessage);
+      console.error("Error rejecting request:", error);
+      toast.error(error.response?.data?.message || `Failed to reject ${type}`);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const openRejectModal = (request, type) => {
+    setSelectedRequest({ ...request, type });
+    setShowRejectModal(true);
   };
 
   const calculateAge = (dateOfBirth) => {
@@ -151,29 +185,12 @@ const PendingRequests = () => {
     return age;
   };
 
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    } catch (error) {
-      return 'N/A';
-    }
+  const getCurrentRequests = () => {
+    return activeTab === 'visitors' ? filteredVisitors : filteredGuests;
   };
 
-  const getStatusVariant = (status) => {
-    switch (status) {
-      case 'pending': return 'warning';
-      case 'approved': return 'success';
-      case 'rejected': return 'danger';
-      default: return 'secondary';
-    }
+  const getCurrentCount = () => {
+    return activeTab === 'visitors' ? filteredVisitors.length : filteredGuests.length;
   };
 
   return (
@@ -183,19 +200,71 @@ const PendingRequests = () => {
       <div className="d-flex justify-content-between align-items-center mb-4">
         <div>
           <h2 style={{ fontFamily: "Poppins, sans-serif", fontWeight: "600", color: "#2c3e50" }}>
-            ⏳ Pending Guest Requests
+            ⏳ Pending Approval Requests
           </h2>
           <Badge bg="warning" className="mb-2">
-            Admin Approval Required
+            Approval Required
           </Badge>
-        </div>
-        <div className="text-muted">
-          {pendingGuests.length} pending requests
         </div>
       </div>
 
+      {/* Stats Cards */}
+      <Row className="mb-4">
+        <Col md={4}>
+          <Card className="border-warning">
+            <Card.Body className="text-center">
+              <Users size={24} className="text-warning mb-2" />
+              <h4 className="text-warning">{stats.pendingVisitors}</h4>
+              <p className="mb-0">Pending Visitors</p>
+            </Card.Body>
+          </Card>
+        </Col>
+        <Col md={4}>
+          <Card className="border-warning">
+            <Card.Body className="text-center">
+              <UserCheck size={24} className="text-warning mb-2" />
+              <h4 className="text-warning">{stats.pendingGuests}</h4>
+              <p className="mb-0">Pending Guests</p>
+            </Card.Body>
+          </Card>
+        </Col>
+        <Col md={4}>
+          <Card className="border-danger">
+            <Card.Body className="text-center">
+              <Clock size={24} className="text-danger mb-2" />
+              <h4 className="text-danger">{stats.totalPending}</h4>
+              <p className="mb-0">Total Pending</p>
+            </Card.Body>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Tabs and Search Section */}
       <Card className="mb-4 border-0 bg-light">
         <Card.Body>
+          <Tabs
+            activeKey={activeTab}
+            onSelect={(tab) => setActiveTab(tab)}
+            className="mb-3"
+          >
+            <Tab eventKey="visitors" title={
+              <span>
+                <Users size={16} className="me-1" />
+                Visitors ({stats.pendingVisitors})
+              </span>
+            }>
+              {/* Visitor tab content will be in the table below */}
+            </Tab>
+            <Tab eventKey="guests" title={
+              <span>
+                <UserCheck size={16} className="me-1" />
+                Guests ({stats.pendingGuests})
+              </span>
+            }>
+              {/* Guest tab content will be in the table below */}
+            </Tab>
+          </Tabs>
+
           <Row className="align-items-center">
             <Col md={8}>
               <InputGroup>
@@ -204,96 +273,101 @@ const PendingRequests = () => {
                 </InputGroup.Text>
                 <Form.Control
                   type="text"
-                  placeholder="Search pending requests..."
+                  placeholder={`Search pending ${activeTab}...`}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="border-start-0"
                 />
-                <Form.Select 
-                  value={searchBy} 
-                  onChange={(e) => setSearchBy(e.target.value)}
-                  className="bg-white"
-                  style={{ maxWidth: '150px' }}
-                >
-                  {searchOptions.map(option => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Form.Select>
               </InputGroup>
+            </Col>
+            <Col md={4}>
+              <div className="text-muted small">
+                {getCurrentCount()} pending {activeTab} found
+              </div>
             </Col>
           </Row>
         </Card.Body>
       </Card>
 
-      {isLoading && pendingGuests.length === 0 ? (
+      {isLoading && getCurrentCount() === 0 ? (
         <div className="text-center">
           <Spinner animation="border" role="status">
             <span className="visually-hidden">Loading pending requests...</span>
           </Spinner>
         </div>
-      ) : filteredPendingGuests.length === 0 ? (
-        <Alert variant="success">
-          {searchQuery ? 'No pending requests found matching your search.' : 'No pending guest requests. All clear!'}
+      ) : getCurrentCount() === 0 ? (
+        <Alert variant="info">
+          {searchQuery 
+            ? `No pending ${activeTab} found matching your search.` 
+            : `No pending ${activeTab} requests. All clear!`
+          }
         </Alert>
       ) : (
         <Table striped bordered hover responsive className="bg-white">
-          <thead className="table-dark">
+          <thead className="table-warning">
             <tr>
               <th>Request ID</th>
               <th>Full Name</th>
               <th>Gender</th>
-              <th>Visit Purpose</th>
-              <th>Submission Date</th>
-              <th>Status</th>
-              <th style={{ width: '150px' }}>Actions</th>
+              <th>Age</th>
+              {activeTab === 'visitors' ? (
+                <>
+                  <th>Prisoner ID</th>
+                  <th>Relationship</th>
+                </>
+              ) : (
+                <th>Visit Purpose</th>
+              )}
+              <th>Contact</th>
+              <th>Date Submitted</th>
+              <th style={{ width: '180px' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {filteredPendingGuests.map(guest => (
-              <tr key={guest._id}>
-                <td><strong>{guest.id}</strong></td>
-                <td>{guest.fullName}</td>
-                <td>{guest.sex}</td>
-                <td>{guest.visitPurpose}</td>
-                <td>{formatDate(guest.submissionDate)}</td>
+            {getCurrentRequests().map(request => (
+              <tr key={request._id}>
+                <td><strong>{request.id}</strong></td>
+                <td>{request.fullName}</td>
+                <td>{request.sex}</td>
+                <td>{calculateAge(request.dateOfBirth)}</td>
+                {activeTab === 'visitors' ? (
+                  <>
+                    <td>{request.prisonerId}</td>
+                    <td>{request.relationship}</td>
+                  </>
+                ) : (
+                  <td>{request.visitPurpose}</td>
+                )}
+                <td>{request.contact}</td>
                 <td>
-                  <Badge bg={getStatusVariant(guest.status)}>
-                    <Clock size={12} className="me-1" />
-                    {guest.status.toUpperCase()}
-                  </Badge>
+                  {new Date(request.createdAt).toLocaleDateString()}
                 </td>
                 <td>
-                  <div className="d-flex gap-1">
+                  <ButtonGroup size="sm">
                     <Button 
                       variant="outline-info" 
-                      size="sm" 
-                      onClick={() => handleView(guest)}
-                      className="p-1"
+                      onClick={() => handleView(request, activeTab)}
                       title="View Details"
                     >
                       <Eye size={14} />
                     </Button>
                     <Button 
                       variant="outline-success" 
-                      size="sm" 
-                      onClick={() => handleApprove(guest)}
-                      className="p-1"
-                      title="Approve Request"
+                      onClick={() => handleApprove(request.id, activeTab)}
+                      disabled={isLoading}
+                      title="Approve"
                     >
                       <Check size={14} />
                     </Button>
                     <Button 
                       variant="outline-danger" 
-                      size="sm" 
-                      onClick={() => handleReject(guest)}
-                      className="p-1"
-                      title="Reject Request"
+                      onClick={() => openRejectModal(request, activeTab)}
+                      disabled={isLoading}
+                      title="Reject"
                     >
                       <X size={14} />
                     </Button>
-                  </div>
+                  </ButtonGroup>
                 </td>
               </tr>
             ))}
@@ -302,153 +376,126 @@ const PendingRequests = () => {
       )}
 
       {/* View Modal */}
-      <Modal show={showViewModal} onHide={() => setShowViewModal(false)} size="lg">
+      <Modal show={showModal} onHide={() => setShowModal(false)} size="lg">
         <Modal.Header closeButton>
-          <Modal.Title>Guest Request Details - {selectedGuest?.id}</Modal.Title>
+          <Modal.Title>
+            {selectedRequest?.type === 'visitor' ? 'Visitor' : 'Guest'} Request Details - {selectedRequest?.id}
+          </Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          {selectedGuest && (
+          {selectedRequest && (
             <Row>
               <Col md={6}>
                 <Card className="mb-3">
                   <Card.Header>
-                    <strong>Guest Information</strong>
+                    <strong>
+                      {selectedRequest.type === 'visitor' ? 'Visitor' : 'Guest'} Information
+                    </strong>
                   </Card.Header>
                   <Card.Body>
-                    {selectedGuest.photo && (
+                    {selectedRequest.photo && (
                       <div className="text-center mb-3">
                         <img 
-                          src={
-                            selectedGuest.photo.startsWith('http') 
-                              ? selectedGuest.photo 
-                              : `http://localhost:5000/uploads/${selectedGuest.photo}`
-                          }
-                          alt="Guest"
+                          src={`http://localhost:5000/uploads/${selectedRequest.photo}`}
+                          alt={selectedRequest.type}
                           style={{ 
                             maxWidth: '200px', 
                             maxHeight: '200px', 
                             objectFit: 'cover',
                             borderRadius: '5px'
                           }}
-                          onError={(e) => {
-                            e.target.style.display = 'none';
-                          }}
                         />
                       </div>
                     )}
-                    <p><strong>Full Name:</strong> {selectedGuest.fullName}</p>
-                    <p><strong>Gender:</strong> {selectedGuest.sex}</p>
-                    <p><strong>Date of Birth:</strong> {new Date(selectedGuest.dateOfBirth).toLocaleDateString()}</p>
-                    <p><strong>Age:</strong> {calculateAge(selectedGuest.dateOfBirth)}</p>
-                    <p><strong>Address:</strong> {selectedGuest.address}</p>
-                    <p><strong>Contact:</strong> {selectedGuest.contact || 'N/A'}</p>
+                    <p><strong>Full Name:</strong> {selectedRequest.fullName}</p>
+                    <p><strong>Gender:</strong> {selectedRequest.sex}</p>
+                    <p><strong>Date of Birth:</strong> {new Date(selectedRequest.dateOfBirth).toLocaleDateString()}</p>
+                    <p><strong>Age:</strong> {calculateAge(selectedRequest.dateOfBirth)}</p>
+                    <p><strong>Address:</strong> {selectedRequest.address}</p>
+                    <p><strong>Contact:</strong> {selectedRequest.contact || 'N/A'}</p>
                   </Card.Body>
                 </Card>
               </Col>
               <Col md={6}>
                 <Card className="mb-3">
                   <Card.Header>
-                    <strong>Visit Details</strong>
+                    <strong>
+                      {selectedRequest.type === 'visitor' ? 'Visit' : 'Guest'} Details
+                    </strong>
                   </Card.Header>
                   <Card.Body>
-                    <p><strong>Visit Purpose:</strong> {selectedGuest.visitPurpose}</p>
-                    <p><strong>Submission Date:</strong> {formatDate(selectedGuest.submissionDate)}</p>
-                    <p><strong>Status:</strong> 
-                      <Badge bg={getStatusVariant(selectedGuest.status)} className="ms-2">
-                        {selectedGuest.status.toUpperCase()}
-                      </Badge>
-                    </p>
+                    {selectedRequest.type === 'visitor' ? (
+                      <>
+                        <p><strong>Prisoner ID:</strong> {selectedRequest.prisonerId}</p>
+                        <p><strong>Relationship:</strong> {selectedRequest.relationship}</p>
+                      </>
+                    ) : (
+                      <p><strong>Visit Purpose:</strong> {selectedRequest.visitPurpose}</p>
+                    )}
+                    <p><strong>Status:</strong> <Badge bg="warning">Pending Approval</Badge></p>
+                    <p><strong>Submitted:</strong> {new Date(selectedRequest.createdAt).toLocaleString()}</p>
                   </Card.Body>
                 </Card>
-
-                {/* QR Code section - Show message for pending guests */}
-                <Card className="mb-3">
-                  <Card.Header>
-                    <strong>QR Code Status</strong>
+                
+                <Card className="border-warning">
+                  <Card.Header className="bg-warning text-dark">
+                    <strong>Approval Actions</strong>
                   </Card.Header>
-                  <Card.Body className="text-center">
-                    <Alert variant="info">
-                      <strong>QR Code will be generated after approval</strong>
-                      <br />
-                      <small>Once approved, the guest will receive a unique QR code for entry/exit tracking.</small>
-                    </Alert>
+                  <Card.Body>
+                    <p className="text-muted small mb-3">
+                      Review the {selectedRequest.type} information before approving or rejecting this request.
+                    </p>
+                    <div className="d-grid gap-2">
+                      <Button 
+                        variant="success" 
+                        onClick={() => {
+                          handleApprove(selectedRequest.id, selectedRequest.type);
+                          setShowModal(false);
+                        }}
+                        disabled={isLoading}
+                      >
+                        <Check size={16} className="me-1" />
+                        Approve {selectedRequest.type === 'visitor' ? 'Visitor' : 'Guest'}
+                      </Button>
+                      <Button 
+                        variant="outline-danger" 
+                        onClick={() => {
+                          setShowModal(false);
+                          openRejectModal(selectedRequest, selectedRequest.type);
+                        }}
+                        disabled={isLoading}
+                      >
+                        <X size={16} className="me-1" />
+                        Reject Request
+                      </Button>
+                    </div>
                   </Card.Body>
                 </Card>
               </Col>
             </Row>
           )}
         </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowViewModal(false)}>
-            Close
-          </Button>
-          <Button variant="success" onClick={() => handleApprove(selectedGuest)}>
-            <Check size={16} className="me-1" />
-            Approve
-          </Button>
-          <Button variant="danger" onClick={() => handleReject(selectedGuest)}>
-            <X size={16} className="me-1" />
-            Reject
-          </Button>
-        </Modal.Footer>
       </Modal>
 
-      {/* Approve Confirmation Modal */}
-      <Modal show={showApproveModal} onHide={() => setShowApproveModal(false)}>
-        <Modal.Header closeButton>
-          <Modal.Title>Approve Guest Request</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <Alert variant="success">
-            <strong>Are you sure you want to approve this guest request?</strong>
-          </Alert>
-          <p>
-            <strong>Guest:</strong> {selectedGuest?.fullName}<br/>
-            <strong>Request ID:</strong> {selectedGuest?.id}<br/>
-            <strong>Visit Purpose:</strong> {selectedGuest?.visitPurpose}
-          </p>
-          <p className="text-muted">
-            Once approved:
-            <ul>
-              <li>Guest will be added to the main guest list</li>
-              <li>A unique QR code will be generated</li>
-              <li>Guest can now use the QR code for entry/exit</li>
-              <li>Request will be removed from pending list</li>
-            </ul>
-          </p>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowApproveModal(false)}>
-            Cancel
-          </Button>
-          <Button variant="success" onClick={approveGuest} disabled={isLoading}>
-            {isLoading ? <Spinner size="sm" /> : 'Yes, Approve'}
-          </Button>
-        </Modal.Footer>
-      </Modal>
-
-      {/* Reject Confirmation Modal */}
+      {/* Reject Modal */}
       <Modal show={showRejectModal} onHide={() => setShowRejectModal(false)}>
         <Modal.Header closeButton>
-          <Modal.Title>Reject Guest Request</Modal.Title>
+          <Modal.Title>
+            Reject {selectedRequest?.type === 'visitor' ? 'Visitor' : 'Guest'} Request
+          </Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          <Alert variant="danger">
-            <strong>Are you sure you want to reject this guest request?</strong>
-          </Alert>
           <p>
-            <strong>Guest:</strong> {selectedGuest?.fullName}<br/>
-            <strong>Request ID:</strong> {selectedGuest?.id}
+            Are you sure you want to reject <strong>{selectedRequest?.fullName}</strong>?
           </p>
           <Form.Group className="mb-3">
-            <Form.Label>Rejection Reason *</Form.Label>
+            <Form.Label>Rejection Reason (Optional)</Form.Label>
             <Form.Control
               as="textarea"
               rows={3}
               value={rejectionReason}
               onChange={(e) => setRejectionReason(e.target.value)}
-              placeholder="Please provide a reason for rejection..."
-              required
+              placeholder="Enter reason for rejection..."
             />
           </Form.Group>
         </Modal.Body>
@@ -456,8 +503,12 @@ const PendingRequests = () => {
           <Button variant="secondary" onClick={() => setShowRejectModal(false)}>
             Cancel
           </Button>
-          <Button variant="danger" onClick={rejectGuest} disabled={isLoading || !rejectionReason.trim()}>
-            {isLoading ? <Spinner size="sm" /> : 'Yes, Reject'}
+          <Button 
+            variant="danger" 
+            onClick={() => handleReject(selectedRequest?.id, selectedRequest?.type)}
+            disabled={isLoading}
+          >
+            {isLoading ? <Spinner size="sm" /> : 'Reject Request'}
           </Button>
         </Modal.Footer>
       </Modal>

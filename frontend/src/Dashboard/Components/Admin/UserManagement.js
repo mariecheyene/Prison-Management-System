@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { Form, Button, Modal, Spinner, Table, Badge, Card, Row, Col, InputGroup } from "react-bootstrap";
+import { 
+  Container, Row, Col, Table, Button, Modal, Form, 
+  Spinner, Badge, Card, InputGroup, Alert 
+} from "react-bootstrap";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import axios from "axios";
-import { Edit2, Trash2, Eye, EyeOff } from 'react-feather';
-import "../../css/Dashboard.css";
+import { Edit2, Trash2, Eye, EyeOff, Search, Plus, Download } from 'react-feather';
 
 const UserManagement = () => {
   const [showModal, setShowModal] = useState(false);
@@ -21,18 +23,36 @@ const UserManagement = () => {
     role: "",
   });
   const [users, setUsers] = useState([]);
+  const [filteredUsers, setFilteredUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [roleError, setRoleError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchBy, setSearchBy] = useState('name');
+
+  const searchOptions = [
+    { value: 'name', label: 'Name' },
+    { value: 'email', label: 'Email' },
+    { value: 'role', label: 'Role' }
+  ];
 
   // Predefined system accounts that cannot be edited or deleted
   const predefinedAccounts = ["fulladmin@prison.com", "system@prison.com"];
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  useEffect(() => {
+    filterUsers();
+  }, [searchQuery, searchBy, users]);
 
   const fetchUsers = async () => {
     setIsLoading(true);
     try {
       const response = await axios.get("http://localhost:5000/users");
       setUsers(response.data);
+      setFilteredUsers(response.data);
     } catch (error) {
       console.error("Error fetching users:", error);
       toast.error("Failed to fetch users");
@@ -41,9 +61,20 @@ const UserManagement = () => {
     }
   };
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
+  const filterUsers = () => {
+    if (!searchQuery.trim()) {
+      setFilteredUsers(users);
+      return;
+    }
+
+    const filtered = users.filter(user => {
+      const query = searchQuery.toLowerCase();
+      const value = user[searchBy]?.toString().toLowerCase() || '';
+      return value.includes(query);
+    });
+    
+    setFilteredUsers(filtered);
+  };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -109,7 +140,6 @@ const UserManagement = () => {
     setIsLoading(true);
 
     try {
-      // Find the user ID from the users array
       const userToUpdate = users.find(user => user.email === editFormData.email);
       if (!userToUpdate) {
         toast.error("User not found");
@@ -146,7 +176,6 @@ const UserManagement = () => {
 
     setIsLoading(true);
     try {
-      // Find the user ID from the users array
       const userToDelete = users.find(user => user.email === email);
       if (!userToDelete) {
         toast.error("User not found");
@@ -189,15 +218,53 @@ const UserManagement = () => {
     return variantMap[role] || 'secondary';
   };
 
+  const exportToCSV = () => {
+    const headers = ['Name', 'Email', 'Role', 'Status'];
+    const csvData = users.map(user => [
+      user.name,
+      user.email,
+      formatRole(user.role),
+      'Active'
+    ]);
+
+    const csvContent = [headers, ...csvData]
+      .map(row => row.map(field => `"${field}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `users_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    window.URL.revokeObjectURL(url);
+    
+    toast.success(`Exported ${users.length} users to CSV`);
+  };
+
   return (
-    <div className="user-management">
+    <Container>
+      <ToastContainer />
+      
       <div className="d-flex justify-content-between align-items-center mb-4">
-        <h2 style={{ fontFamily: "Poppins, sans-serif", fontWeight: "600", color: "#2c3e50" }}>
-          👤User Management
-        </h2>
-        <Button variant="primary" onClick={() => setShowModal(true)}>
-          + Add User
-        </Button>
+        <div>
+          <h2 style={{ fontFamily: "Poppins, sans-serif", fontWeight: "600", color: "#2c3e50" }}>
+            👤 User Management
+          </h2>
+          <Badge bg="info" className="mb-2">
+            Admin Access
+          </Badge>
+        </div>
+        <div className="d-flex gap-2">
+          <Button variant="outline-dark" size="sm" onClick={exportToCSV}>
+            <Download size={16} className="me-1" />
+            Export CSV
+          </Button>
+          <Button variant="dark" onClick={() => setShowModal(true)}>
+            <Plus size={16} className="me-1" />
+            Add User
+          </Button>
+        </div>
       </div>
 
       {/* Role Information Cards */}
@@ -238,21 +305,63 @@ const UserManagement = () => {
         </Col>
       </Row>
 
+      <Card className="mb-4 border-0 bg-light">
+        <Card.Body>
+          <Row className="align-items-center">
+            <Col md={8}>
+              <InputGroup>
+                <InputGroup.Text className="bg-white">
+                  <Search size={16} />
+                </InputGroup.Text>
+                <Form.Control
+                  type="text"
+                  placeholder="Search users..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="border-start-0"
+                />
+                <Form.Select 
+                  value={searchBy} 
+                  onChange={(e) => setSearchBy(e.target.value)}
+                  className="bg-white"
+                  style={{ maxWidth: '150px' }}
+                >
+                  {searchOptions.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Form.Select>
+              </InputGroup>
+            </Col>
+            <Col md={4}>
+              <div className="text-muted small">
+                {filteredUsers.length} users found 
+              </div>
+            </Col>
+          </Row>
+        </Card.Body>
+      </Card>
+
       {/* Users Table */}
       <Card>
         <Card.Header>
           <h5 className="mb-0">System Users</h5>
         </Card.Header>
         <Card.Body className="p-0">
-          {isLoading ? (
+          {isLoading && users.length === 0 ? (
             <div className="text-center p-4">
               <Spinner animation="border" role="status">
                 <span className="visually-hidden">Loading...</span>
               </Spinner>
             </div>
+          ) : filteredUsers.length === 0 ? (
+            <Alert variant="info" className="m-3">
+              {searchQuery ? 'No users found matching your search.' : 'No users found. Click "Add User" to create the first user.'}
+            </Alert>
           ) : (
-            <Table striped bordered hover responsive className="mb-0">
-              <thead className="bg-dark text-white">
+            <Table striped bordered hover responsive className="mb-0 bg-white">
+              <thead className="table-dark">
                 <tr>
                   <th className="text-center align-middle">Name</th>
                   <th className="text-center align-middle">Email</th>
@@ -262,7 +371,7 @@ const UserManagement = () => {
                 </tr>
               </thead>
               <tbody>
-                {users.map((user) => {
+                {filteredUsers.map((user) => {
                   const isPredefined = predefinedAccounts.includes(user.email.toLowerCase());
                   
                   return (
@@ -311,13 +420,6 @@ const UserManagement = () => {
                     </tr>
                   );
                 })}
-                {users.length === 0 && (
-                  <tr>
-                    <td colSpan="5" className="text-center text-muted py-4">
-                      No users found. Click "Add User" to create the first user.
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </Table>
           )}
@@ -415,7 +517,7 @@ const UserManagement = () => {
             </Form.Group>
             
             <div className="d-flex gap-2">
-              <Button variant="primary" type="submit" disabled={isLoading} className="flex-fill">
+              <Button variant="dark" type="submit" disabled={isLoading} className="flex-fill">
                 {isLoading ? <Spinner size="sm" /> : "Create User"}
               </Button>
               <Button 
@@ -497,7 +599,7 @@ const UserManagement = () => {
             </Form.Group>
             
             <div className="d-flex gap-2">
-              <Button variant="warning" type="submit" disabled={isLoading} className="flex-fill">
+              <Button variant="dark" type="submit" disabled={isLoading} className="flex-fill">
                 {isLoading ? <Spinner size="sm" /> : "Update User"}
               </Button>
               <Button 
@@ -511,9 +613,7 @@ const UserManagement = () => {
           </Form>
         </Modal.Body>
       </Modal>
-
-      <ToastContainer position="top-right" autoClose={3000} />
-    </div>
+    </Container>
   );
 };
 

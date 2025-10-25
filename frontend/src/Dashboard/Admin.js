@@ -24,6 +24,7 @@ const Admin = () => {
   const [isSidebarClosed, setIsSidebarClosed] = useState(false);
   const [user, setUser] = useState(null);
   const [showScanModal, setShowScanModal] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
   const location = useLocation();
 
   useEffect(() => {
@@ -42,78 +43,71 @@ const Admin = () => {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  const getAdminTitle = () => {
-    if (!user) return "Visitor Management System";
-    
-    const role = user.role.toLowerCase();
-    if (role === 'fulladmin') return "Visitor Management System - Full Access";
-    if (role === 'maleadmin') return "Visitor Management System - Male Division";
-    if (role === 'femaleadmin') return "Visitor Management System - Female Division";
-    return "Visitor Management System";
+  // Real-time clock
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatTime = (date) => {
+    return date.toLocaleTimeString('en-US', {
+      hour12: true,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
   };
 
-  const getAccessBadge = () => {
-    if (!user) return null;
-    
-    const role = user.role.toLowerCase();
-    let badgeText = "";
-    let badgeVariant = "";
-    
-    if (role === 'fulladmin') {
-      badgeText = "Full Access";
-      badgeVariant = "success";
-    } else if (role === 'maleadmin') {
-      badgeText = "Male Access Only";
-      badgeVariant = "primary";
-    } else if (role === 'femaleadmin') {
-      badgeText = "Female Access Only";
-      badgeVariant = "danger";
-    }
-    
-    return (
-      <Badge bg={badgeVariant} className="ms-2 access-badge">
-        {badgeText}
-      </Badge>
-    );
+  const formatDate = (date) => {
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
   };
 
   return (
     <div className="dashboard">
       <div className={`sidebar ${isSidebarClosed ? "close" : ""}`}>
-  <NavLink to="/admin/dashboard" className="logo">
-    <i className="bx bx-shield-quarter"></i>
-    <div className="logo-name">
-      <span>Visitor Management</span>
-      <div className="access-badge-container">
-        {getAccessBadge()}
-      </div>
-    </div>
-  </NavLink>
-        <ul className="side-menu">
-          {[
-            { name: "Dashboard", icon: "bx bxs-dashboard", path: "/admin/dashboard" },
-            { name: "Recorded Visits", icon: "bx bxs-calendar-check", path: "/admin/record-visits" },
-            { name: "Visitors", icon: "bx bxs-user-voice", path: "/admin/visitors" },
-            { name: "Guests", icon: "bx bxs-user-badge", path: "/admin/guest" },
-            { name: "Inmates", icon: "bx bxs-user-account", path: "/admin/inmates" },
-            { name: "Crime List", icon: "bx bxs-error", path: "/admin/crimes" },
-            { name: "Reports", icon: "bx bxs-report", path: "/admin/reports-analytics" },
-            { name: "Pending Visitors", icon: "bx bxs-time-five", path: "/admin/pending-requests" },
-            { name: "User Management", icon: "bx bxs-user-detail", path: "/admin/user-management" },
-            { name: "Maintenance", icon: "bx bxs-wrench", path: "/admin/maintenance" },
-            { name: "System Logs", icon: "bx bxs-notepad", path: "/admin/logs" },
-          ].map((link, index) => (
-            <li key={index}>
-              <NavLink
-                to={link.path}
-                className={({ isActive }) => (isActive ? "active" : "")}
-              >
-                <i className={link.icon}></i>
-                <span>{link.name}</span>
-              </NavLink>
-            </li>
-          ))}
-        </ul>
+            <NavLink to="/admin/dashboard" className="logo">
+        <div className="logo-img">
+          <img src="/img/logo.jpg" alt="LANAO DEL NORTE DISTRICT JAIL REGION 10 Logo" />
+        </div>
+        <div className="logo-name">
+          <span>LANAO DEL NORTE</span>
+          <span>DISTRICT JAIL REGION 10</span>
+        </div>
+      </NavLink>
+          <ul className="side-menu">
+            {[
+              { name: "Dashboard", icon: "bx bxs-dashboard", path: "/admin/dashboard" },
+              { name: "Recorded Visits", icon: "bx bxs-calendar-check", path: "/admin/record-visits" },
+              { name: "Visitors", icon: "bx bxs-user-voice", path: "/admin/visitors" },
+              { name: "Guests", icon: "bx bxs-user-badge", path: "/admin/guest" },
+              { name: "Inmates", icon: "bx bxs-user-account", path: "/admin/inmates" },
+              { name: "Crime List", icon: "bx bxs-error", path: "/admin/crimes" },
+              { name: "Reports", icon: "bx bxs-report", path: "/admin/reports-analytics" },
+              { name: "Pending Visitors", icon: "bx bxs-time-five", path: "/admin/pending-requests" },
+              { name: "User Management", icon: "bx bxs-user-detail", path: "/admin/user-management" },
+              { name: "Maintenance", icon: "bx bxs-wrench", path: "/admin/maintenance" },
+              { name: "System Logs", icon: "bx bxs-notepad", path: "/admin/logs" },
+            ].map((link, index) => (
+              <li key={index}>
+                <NavLink
+                  to={link.path}
+                  className={({ isActive }) => (isActive ? "active" : "")}
+                >
+                  <i className={link.icon}></i>
+                  <span>{link.name}</span>
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        
         <ul className="side-menu">
           <li>
             <NavLink to="/" className="logout" onClick={() => localStorage.removeItem("user")}>
@@ -132,10 +126,12 @@ const Admin = () => {
           ></i>
           
           <div className="nav-title">
-            <h5 className="mb-0">{getAdminTitle()}</h5>
+            <h5 className="mb-0"></h5>
+            <div className="real-time-clock">
+              {formatTime(currentTime)} | {formatDate(currentTime)}
+            </div>
           </div>
           
-          {/* Scan QR Button in Navigation */}
           <Button 
             variant="success" 
             onClick={() => setShowScanModal(true)}
@@ -192,7 +188,6 @@ const Admin = () => {
         </main>
       </div>
 
-      {/* QR Scanner Modal */}
       <ScanQR 
         show={showScanModal} 
         onHide={() => setShowScanModal(false)} 

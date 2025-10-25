@@ -21,6 +21,7 @@ const Staff = () => {
   const [isSidebarClosed, setIsSidebarClosed] = useState(false);
   const [user, setUser] = useState(null);
   const [showScanModal, setShowScanModal] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
   const location = useLocation();
 
   useEffect(() => {
@@ -39,26 +40,46 @@ const Staff = () => {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  const getStaffTitle = () => {
-    return "Visitor Management System - Staff Access";
+  // Real-time clock
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatTime = (date) => {
+    return date.toLocaleTimeString('en-US', {
+      hour12: true,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
   };
 
-  const getAccessBadge = () => {
-    return (
-      <Badge bg="info" className="ms-2 access-badge">
-        Staff Access
-      </Badge>
-    );
+  const formatDate = (date) => {
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  const getStaffTitle = () => {
+    return "";
   };
 
   return (
     <div className="dashboard">
       <div className={`sidebar ${isSidebarClosed ? "close" : ""}`}>
         <NavLink to="/staff/dashboard" className="logo">
-          <i className="bx bx-shield-quarter"></i>
+          <div className="logo-img">
+            <img src="/img/logo.jpg" alt="LANAO DEL NORTE DISTRICT JAIL REGION 10 Logo" />
+          </div>
           <div className="logo-name">
-            <span>Visitor Management</span>
-            {getAccessBadge()}
+            <span>LANAO DEL NORTE DISTRICT JAIL REGION 10</span>
           </div>
         </NavLink>
         <ul className="side-menu">
@@ -99,6 +120,9 @@ const Staff = () => {
           
           <div className="nav-title">
             <h5 className="mb-0">{getStaffTitle()}</h5>
+            <div className="real-time-clock">
+              {formatTime(currentTime)} | {formatDate(currentTime)}
+            </div>
           </div>
           
           <Button 

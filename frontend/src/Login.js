@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Form, Button, Spinner } from "react-bootstrap";
+import { Form, Button, Spinner, InputGroup } from "react-bootstrap";
 import "bootstrap/dist/css/bootstrap.min.css";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -13,16 +13,19 @@ const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [showLoginForm, setShowLoginForm] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   
   const navigate = useNavigate();
 
-  // Toggle login form visibility
   const toggleLoginForm = () => {
     setShowLoginForm(!showLoginForm);
     setErrorMessage("");
   };
 
-  // Form validation
+  const togglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
+  };
+
   const validateForm = () => {
     if (!email || !password) {
       setErrorMessage("Please fill in both fields.");
@@ -35,7 +38,6 @@ const Login = () => {
     return true;
   };
 
-  // Handle form submission
   const handleLogin = async (e) => {
     e.preventDefault();
     setErrorMessage("");
@@ -147,7 +149,6 @@ const Login = () => {
       });
 
       setTimeout(() => {
-        // Route based on user role - exact role names from UserManagement
         const roleRoutes = {
           'FullAdmin': '/admin/dashboard',
           'MaleAdmin': '/maleadmin/dashboard',
@@ -161,7 +162,6 @@ const Login = () => {
         if (route) {
           navigate(route);
         } else {
-          // Fallback for unknown roles
           console.warn('Unknown role, defaulting to staff dashboard');
           navigate('/staff/dashboard');
         }
@@ -223,6 +223,7 @@ const Login = () => {
             backgroundColor: "rgba(255, 255, 255, 0.2)",
             borderRadius: "25px",
             backdropFilter: "blur(5px)",
+            border: "1px solid rgba(255, 255, 255, 0.3)",
           }}
           onClick={toggleLoginForm}
         >
@@ -237,42 +238,57 @@ const Login = () => {
             position: "relative",
             zIndex: 2,
             textAlign: "center",
-            backgroundColor: "rgba(255, 255, 255, 0.2)",
-            padding: "30px",
+            backgroundColor: "rgba(255, 255, 255, 0.15)",
+            padding: "40px",
             borderRadius: "15px",
-            backdropFilter: "blur(5px)",
+            backdropFilter: "blur(10px)",
             maxWidth: "600px",
+            border: "1px solid rgba(255, 255, 255, 0.2)",
           }}
         >
           <img
             src="/img/logo.jpg"
-            alt="Visitor Management Logo"
+            alt="Lanao Del Norte District Jail Logo"
             style={{
               width: "120px",
               height: "120px",
               borderRadius: "50%",
-              marginBottom: "20px",
-              border: "3px solid white",
+              marginBottom: "25px",
+              border: "3px solid rgba(255, 255, 255, 0.8)",
             }}
           />
           <h1
             style={{
               color: "white",
               textShadow: "2px 2px 4px rgba(0, 0, 0, 0.5)",
-              fontSize: "2.8rem",
+              fontSize: "2.5rem",
               fontWeight: "bold",
               marginBottom: "10px",
+              lineHeight: "1.3",
             }}
           >
-            Visitor Management System
+            Lanao Del Norte District Jail
+            <br />
+            <span style={{
+              fontSize: "3rem",
+              color: "#000",
+              textShadow: "2px 2px 4px rgba(255, 255, 255, 0.8)",
+              fontWeight: "800",
+              display: "block",
+              marginTop: "5px"
+            }}>
+              REGION 10
+            </span>
           </h1>
           <p
             style={{
-              color: "white",
-              fontSize: "1.2rem",
+              color: "rgba(255, 255, 255, 0.9)",
+              fontSize: "1.1rem",
               textShadow: "1px 1px 2px rgba(0, 0, 0, 0.5)",
+              marginTop: "15px",
             }}
           >
+            Visitor Management System
           </p>
         </div>
       )}
@@ -280,14 +296,50 @@ const Login = () => {
       {/* Login form */}
       {showLoginForm && (
         <div className="login-container" style={{ zIndex: 2 }}>
-          <div className="login-box">
-            <h4 className="text-center login-title">System Login</h4>
-            <p className="text-center text-muted mb-4">
-              Enter your credentials to access the system
-            </p>
-            <Form onSubmit={handleLogin} className="mt-3">
+          <div 
+            className="login-box"
+            style={{
+              backgroundColor: "rgba(255, 255, 255, 0.95)",
+              borderRadius: "12px",
+              padding: "30px",
+              boxShadow: "0 8px 32px rgba(0, 0, 0, 0.2)",
+              border: "1px solid rgba(255, 255, 255, 0.3)",
+              backdropFilter: "blur(10px)",
+              maxWidth: "400px",
+              width: "100%",
+            }}
+          >
+            <div className="text-center mb-4">
+              <img
+                src="/img/logo.jpg"
+                alt="Logo"
+                style={{
+                  width: "70px",
+                  height: "70px",
+                  borderRadius: "50%",
+                  marginBottom: "15px",
+                  border: "2px solid #2C3E50",
+                }}
+              />
+              <h4 className="login-title" style={{ 
+                color: "#2C3E50", 
+                fontWeight: "600",
+                marginBottom: "5px"
+              }}>
+                System Login
+              </h4>
+              <p style={{ 
+                color: "#7F8C8D", 
+                fontSize: "0.9rem",
+                margin: 0
+              }}>
+                Enter your credentials to access the system
+              </p>
+            </div>
+
+            <Form onSubmit={handleLogin}>
               <Form.Group className="mb-3" controlId="formEmail">
-                <Form.Label>Email</Form.Label>
+                <Form.Label style={{ color: "#2C3E50", fontWeight: "500" }}>Email</Form.Label>
                 <Form.Control
                   type="email"
                   placeholder="Enter email"
@@ -295,26 +347,55 @@ const Login = () => {
                   onChange={(e) => setEmail(e.target.value)}
                   isInvalid={errorMessage && !email}
                   required
+                  style={{
+                    borderRadius: "8px",
+                    border: "1px solid #BDC3C7",
+                    padding: "12px",
+                    fontSize: "0.95rem"
+                  }}
                 />
-                <Form.Control.Feedback type="invalid">
-                  {errorMessage}
-                </Form.Control.Feedback>
               </Form.Group>
 
-              <Form.Group className="mb-3" controlId="formPassword">
-                <Form.Label>Password</Form.Label>
-                <Form.Control
-                  type="password"
-                  placeholder="Password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  isInvalid={errorMessage && !password}
-                  required
-                />
-                <Form.Control.Feedback type="invalid">
-                  {errorMessage}
-                </Form.Control.Feedback>
+              <Form.Group className="mb-4" controlId="formPassword">
+                <Form.Label style={{ color: "#2C3E50", fontWeight: "500" }}>Password</Form.Label>
+                <InputGroup>
+                  <Form.Control
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    isInvalid={errorMessage && !password}
+                    required
+                    style={{
+                      borderRadius: "8px 0 0 8px",
+                      border: "1px solid #BDC3C7",
+                      borderRight: "none",
+                      padding: "12px",
+                      fontSize: "0.95rem"
+                    }}
+                  />
+                  <InputGroup.Text 
+                    onClick={togglePasswordVisibility}
+                    style={{
+                      backgroundColor: "white",
+                      border: "1px solid #BDC3C7",
+                      borderLeft: "none",
+                      borderRadius: "0 8px 8px 0",
+                      cursor: "pointer",
+                      padding: "12px",
+                      color: "#7F8C8D"
+                    }}
+                  >
+                    <i className={`bx ${showPassword ? 'bx-hide' : 'bx-show'}`} style={{ fontSize: "1.2rem" }}></i>
+                  </InputGroup.Text>
+                </InputGroup>
               </Form.Group>
+
+              {errorMessage && (
+                <div className="alert alert-danger py-2" role="alert" style={{ fontSize: "0.9rem" }}>
+                  {errorMessage}
+                </div>
+              )}
 
               <Button
                 variant="primary"
@@ -322,26 +403,24 @@ const Login = () => {
                 className="w-100"
                 disabled={isLoading}
                 style={{
-                  height: "45px",
-                  fontSize: "1.1rem",
-                  fontWeight: "bold"
+                  height: "48px",
+                  fontSize: "1rem",
+                  fontWeight: "600",
+                  borderRadius: "8px",
+                  border: "none",
+                  backgroundColor: "#34495E",
+                  marginBottom: "20px"
                 }}
               >
                 {isLoading ? <Spinner animation="border" size="sm" /> : "Login"}
               </Button>
 
               {/* Default Credentials Info */}
-              <div className="mt-4 p-3 bg-light rounded">
-                <small className="text-muted">
-                  <strong>Default Credentials:</strong><br/>
+              <div className="mt-4 p-3 rounded" style={{ backgroundColor: "rgba(52, 73, 94, 0.05)" }}>
+                <small style={{ color: "#7F8C8D" }}>
+                  <strong style={{ color: "#2C3E50" }}>Default Credentials:</strong><br/>
                   Admin: admin@gmail.com / Admin_0<br/>
                   Staff: staff@gmail.com / Staff_0
-                </small>
-              </div>
-
-              {/* Role Information */}
-              <div className="mt-3 p-3 bg-info bg-opacity-10 rounded">
-                <small className="text-muted">
                 </small>
               </div>
             </Form>

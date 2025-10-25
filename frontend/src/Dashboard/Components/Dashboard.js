@@ -135,13 +135,14 @@ const Dashboard = () => {
   };
 
   const fetchActiveTimers = async () => {
-    try {
-      const response = await axios.get(ACTIVE_TIMERS_URL);
-      setActiveTimers(response.data || []);
-    } catch (error) {
-      console.error("❌ Error fetching active timers:", error);
-    }
-  };
+  try {
+    const response = await axios.get(ACTIVE_TIMERS_URL);
+    console.log('🕒 Active timers response:', response.data); // Debug log
+    setActiveTimers(response.data || []);
+  } catch (error) {
+    console.error("❌ Error fetching active timers:", error);
+  }
+};
 
   // Chart Data Preparation with REAL data from visitLogs
   const getWeeklyVisitData = () => {
@@ -505,14 +506,58 @@ const Dashboard = () => {
   };
 
   const formatTimeIn = (timeIn) => {
-    if (!timeIn || !isValidDate(timeIn)) return 'N/A';
+  console.log('🕒 Formatting timeIn:', timeIn);
+  
+  if (!timeIn) {
+    console.log('❌ No timeIn provided');
+    return 'N/A';
+  }
+
+  // If it's already a formatted time string (like "2:30 PM"), just return it
+  if (typeof timeIn === 'string' && (timeIn.includes('AM') || timeIn.includes('PM'))) {
+    console.log('✅ Already formatted time string:', timeIn);
+    return timeIn;
+  }
+
+  // If it's a Date object or ISO string, format it
+  if (isValidDate(timeIn)) {
     try {
-      return new Date(timeIn).toLocaleTimeString();
+      const date = new Date(timeIn);
+      const formattedTime = date.toLocaleTimeString('en-US', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        hour12: true 
+      });
+      console.log('✅ Formatted date to time:', timeIn, '->', formattedTime);
+      return formattedTime;
     } catch (error) {
-      console.error('Error formatting time:', error);
+      console.error('❌ Error formatting date:', error);
       return 'N/A';
     }
-  };
+  }
+
+  // If it's a simple time string without AM/PM, try to parse it
+  if (typeof timeIn === 'string' && timeIn.includes(':')) {
+    try {
+      const [hours, minutes] = timeIn.split(':');
+      const hour = parseInt(hours);
+      const minute = parseInt(minutes);
+      
+      if (!isNaN(hour) && !isNaN(minute)) {
+        const period = hour >= 12 ? 'PM' : 'AM';
+        const twelveHour = hour % 12 || 12;
+        const formattedTime = `${twelveHour}:${minute.toString().padStart(2, '0')} ${period}`;
+        console.log('✅ Parsed time string:', timeIn, '->', formattedTime);
+        return formattedTime;
+      }
+    } catch (error) {
+      console.error('❌ Error parsing time string:', error);
+    }
+  }
+
+  console.log('❌ Could not format timeIn:', timeIn);
+  return 'N/A';
+};
 
   const getTimerVariant = (minutes) => {
     if (minutes === null || minutes === undefined || isNaN(minutes)) return 'secondary';

@@ -769,15 +769,6 @@ const handleRemoveBan = async (personId, personType) => {
                     <Slash size={16} />
                   </Button>
                   <Button
-                    variant="outline-info"
-                    size="sm"
-                    onClick={() => handleClearTimeRecords(log)}
-                    title="Reset Time Records"
-                    className="p-1"
-                  >
-                    <RefreshCw size={16} />
-                  </Button>
-                  <Button
                     variant="outline-danger"
                     size="sm"
                     onClick={() => openDeleteModal(log)}

@@ -10,7 +10,6 @@ import {
   Search, 
   Plus, 
   Eye, 
-  Edit2, 
   Download,
   Printer,
   User,
@@ -23,7 +22,6 @@ const Guest = () => {
   const [showModal, setShowModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
-  const [editingGuest, setEditingGuest] = useState(null);
   const [selectedGuest, setSelectedGuest] = useState(null);
   const [selectedQRGuest, setSelectedQRGuest] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -77,7 +75,6 @@ const Guest = () => {
   };
 
   const handleAdd = () => {
-    setEditingGuest(null);
     const initialData = {
       lastName: '',
       firstName: '',
@@ -96,16 +93,6 @@ const Guest = () => {
     setShowModal(true);
   };
 
-  const handleEdit = (guest) => {
-    setEditingGuest(guest);
-    const formattedGuest = {
-      ...guest,
-      dateOfBirth: guest.dateOfBirth ? guest.dateOfBirth.split('T')[0] : ''
-    };
-    setFormData(formattedGuest);
-    setShowModal(true);
-  };
-
   const handleView = (guest) => {
     setSelectedGuest(guest);
     setShowViewModal(true);
@@ -116,6 +103,7 @@ const Guest = () => {
     setShowQRModal(true);
   };
 
+  // REMOVED handleEdit function
   // REMOVED handleDelete function
 
   const [formData, setFormData] = useState({
@@ -188,23 +176,13 @@ const Guest = () => {
         submitData.append('photo', imageFile);
       }
 
-      let response;
-      if (editingGuest) {
-        response = await axios.put(`http://localhost:5000/guests/${editingGuest.id}`, submitData, {
-          headers: {
-            'Content-Type': 'multipart/form-data'
-          }
-        });
-        toast.success('Guest updated successfully!');
-      } else {
-        // Send to pending-guests endpoint for approval workflow
-        response = await axios.post("http://localhost:5000/pending-guests", submitData, {
-          headers: {
-            'Content-Type': 'multipart/form-data'
-          }
-        });
-        toast.success('Guest request submitted for approval!');
-      }
+      // REMOVED edit functionality - only create new guests
+      const response = await axios.post("http://localhost:5000/pending-guests", submitData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      toast.success('Guest request submitted for approval!');
       
       setShowModal(false);
       resetForm();
@@ -213,7 +191,7 @@ const Guest = () => {
       console.error('Error submitting guest:', error);
       const errorMessage = error.response?.data?.message || 
                         error.response?.data?.error || 
-                        `Failed to ${editingGuest ? 'update' : 'create'} guest`;
+                        'Failed to create guest';
       toast.error(errorMessage);
     } finally {
       setIsLoading(false);
@@ -694,7 +672,7 @@ const Guest = () => {
               <th>Last Visit Date</th>
               <th>Time Status</th>
               <th>Violation Type</th>
-              <th style={{ width: '100px' }}>Actions</th>
+              <th style={{ width: '80px' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -748,15 +726,7 @@ const Guest = () => {
                     >
                       <Eye size={14} />
                     </Button>
-                    <Button 
-                      variant="outline-warning" 
-                      size="sm" 
-                      onClick={() => handleEdit(guest)}
-                      className="p-1"
-                      title="Edit Guest"
-                    >
-                      <Edit2 size={14} />
-                    </Button>
+                    {/* EDIT BUTTON REMOVED */}
                     {/* DELETE BUTTON REMOVED */}
                   </div>
                 </td>
@@ -766,10 +736,10 @@ const Guest = () => {
         </Table>
       )}
 
-      {/* Add/Edit Modal */}
+      {/* Add Modal */}
       <Modal show={showModal} onHide={() => setShowModal(false)} size="lg">
         <Modal.Header closeButton>
-          <Modal.Title>{editingGuest ? 'Edit Guest' : 'Add New Guest'}</Modal.Title>
+          <Modal.Title>Add New Guest</Modal.Title>
         </Modal.Header>
         <Form onSubmit={handleSubmit}>
           <Modal.Body style={{ maxHeight: '70vh', overflowY: 'auto' }}>
@@ -934,7 +904,7 @@ const Guest = () => {
               Cancel
             </Button>
             <Button variant="dark" type="submit" disabled={isLoading}>
-              {isLoading ? <Spinner size="sm" /> : (editingGuest ? 'Update' : 'Add') + ' Guest'}
+              {isLoading ? <Spinner size="sm" /> : 'Add Guest'}
             </Button>
           </Modal.Footer>
         </Form>

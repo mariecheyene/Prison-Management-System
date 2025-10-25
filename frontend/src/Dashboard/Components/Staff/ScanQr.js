@@ -293,17 +293,60 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     }
   };
 
-  // Refresh person data to get complete details
+  // ENHANCED: Refresh person data with visit history
   const refreshPersonData = async (personId, personType) => {
     try {
       console.log('🔄 Refreshing person data for:', personId, personType);
-      const response = await axios.get(`http://localhost:5000/${personType}s/${personId}`);
-      console.log('✅ Refreshed person data:', response.data);
-      return response.data;
+      
+      // Get basic person data
+      const personResponse = await axios.get(`http://localhost:5000/${personType}s/${personId}`);
+      console.log('✅ Basic person data:', personResponse.data);
+      
+      // Get visit history data
+      const historyResponse = await axios.get(`http://localhost:5000/${personType}s/${personId}/visit-history?limit=50`);
+      console.log('✅ Visit history data:', historyResponse.data);
+      
+      // Combine the data
+      const completeData = {
+        ...personResponse.data,
+        visitHistory: historyResponse.data.visitHistory || [],
+        totalVisits: historyResponse.data.totalVisits || 0
+      };
+      
+      console.log('✅ Complete person data with history:', completeData);
+      return completeData;
     } catch (error) {
       console.error('❌ Error refreshing person data:', error);
-      return null;
+      
+      // If visit history endpoint fails, still return basic person data
+      try {
+        const personResponse = await axios.get(`http://localhost:5000/${personType}s/${personId}`);
+        return personResponse.data;
+      } catch (fallbackError) {
+        console.error('❌ Fallback also failed:', fallbackError);
+        return null;
+      }
     }
+  };
+
+  // NEW: Get the most recent visit date from visit history
+  const getLastVisitDate = (person) => {
+    if (!person) return null;
+    
+    // First try the direct fields
+    if (person.lastVisitDate) return person.lastVisitDate;
+    if (person.dateVisited) return person.dateVisited;
+    
+    // Then try visit history
+    if (person.visitHistory && person.visitHistory.length > 0) {
+      // Sort by visit date descending and get the most recent
+      const sortedHistory = [...person.visitHistory].sort((a, b) => 
+        new Date(b.visitDate) - new Date(a.visitDate)
+      );
+      return sortedHistory[0]?.visitDate || null;
+    }
+    
+    return null;
   };
 
   // Generate full name from individual name fields
@@ -392,13 +435,15 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
         return;
       }
 
-      // Refresh person data to ensure we have complete details
+      // ENHANCED: Refresh person data with visit history
       const completePersonData = await refreshPersonData(personId, isGuest ? 'guest' : 'visitor');
       
       // Generate full name if it doesn't exist
       const personWithFullName = {
         ...(completePersonData || scanResult.person),
-        fullName: generateFullName(completePersonData || scanResult.person)
+        fullName: generateFullName(completePersonData || scanResult.person),
+        // Calculate last visit date from history
+        calculatedLastVisitDate: getLastVisitDate(completePersonData || scanResult.person)
       };
 
       // Set scanned person with complete data and scan type from backend
@@ -462,7 +507,7 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       const response = await axios.put(endpoint);
       console.log('✅ BACKEND RESPONSE:', response.data);
 
-      // REFRESH: Get complete person data after approval
+      // ENHANCED: Refresh person data with visit history after approval
       const freshPersonData = await refreshPersonData(scannedPerson.id, personType);
       
       let updatedPersonData = freshPersonData || scannedPerson; // Fallback to original if refresh fails
@@ -483,7 +528,9 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       // Generate full name for the updated data
       const updatedPersonWithFullName = {
         ...updatedPersonData,
-        fullName: generateFullName(updatedPersonData)
+        fullName: generateFullName(updatedPersonData),
+        // Recalculate last visit date
+        calculatedLastVisitDate: getLastVisitDate(updatedPersonData)
       };
 
       // FIXED: Proper merge with all original data preserved
@@ -530,13 +577,14 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
         status: 'rejected'
       });
       
-      // Refresh data after decline
+      // ENHANCED: Refresh data with visit history after decline
       const freshPersonData = await refreshPersonData(scannedPerson.id, personType);
       
       // Generate full name for refreshed data
       const personWithFullName = {
         ...(freshPersonData || scannedPerson),
-        fullName: generateFullName(freshPersonData || scannedPerson)
+        fullName: generateFullName(freshPersonData || scannedPerson),
+        calculatedLastVisitDate: getLastVisitDate(freshPersonData || scannedPerson)
       };
       
       setScannedPerson({
@@ -679,6 +727,40 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     return timeString;
   };
 
+  // ENHANCED: Format last visit date display with multiple fallbacks
+  const formatLastVisitDisplay = (person) => {
+    if (!person) return 'No previous visits';
+    
+    // Try multiple sources for last visit date
+    const lastVisitDate = 
+      person.calculatedLastVisitDate || // From our enhanced calculation
+      person.lastVisitDate ||           // Direct field
+      person.dateVisited ||             // Alternative field
+      (person.visitHistory && person.visitHistory.length > 0 ? 
+        person.visitHistory[0]?.visitDate : null); // From history
+    
+    if (lastVisitDate) {
+      try {
+        return new Date(lastVisitDate).toLocaleDateString();
+      } catch (error) {
+        console.error('Error formatting last visit date:', error);
+        return 'Invalid date';
+      }
+    }
+    
+    // Check if they have any visit history at all
+    if (person.visitHistory && person.visitHistory.length > 0) {
+      return 'Has visit history (date unavailable)';
+    }
+    
+    // Check total visits count
+    if (person.totalVisits && person.totalVisits > 0) {
+      return `Has ${person.totalVisits} previous visit(s)`;
+    }
+    
+    return 'No previous visits';
+  };
+
   // Render different content based on person type
   const renderPersonDetails = () => {
     if (!scannedPerson) return null;
@@ -753,6 +835,11 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
             </div>
             <div className="mt-2">
               <small className="text-muted">ID: {scannedPerson.id}</small>
+              {scannedPerson.totalVisits > 0 && (
+                <small className="text-muted d-block">
+                  Total Visits: <Badge bg="secondary">{scannedPerson.totalVisits}</Badge>
+                </small>
+              )}
             </div>
           </Col>
         </Row>
@@ -766,7 +853,7 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
               <Card.Body>
                 <Row>
                   <Col md={6}>
-                    <p><strong>Last Visit Date:</strong> {scannedPerson.lastVisitDate ? new Date(scannedPerson.lastVisitDate).toLocaleDateString() : 'No previous visits'}</p>
+                    <p><strong>Last Visit Date:</strong> {formatLastVisitDisplay(scannedPerson)}</p>
                     <p><strong>Time In:</strong> {scannedPerson.timeIn ? <Badge bg="success" className="fs-6">{formatTimeDisplay(scannedPerson.timeIn)}</Badge> : 'Not recorded'}</p>
                     <p><strong>Date Visited:</strong> {scannedPerson.dateVisited ? new Date(scannedPerson.dateVisited).toLocaleDateString() : 'N/A'}</p>
                   </Col>
@@ -778,6 +865,17 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
                     )}
                   </Col>
                 </Row>
+                {scannedPerson.visitHistory && scannedPerson.visitHistory.length > 0 && (
+                  <Row className="mt-3">
+                    <Col>
+                      <small className="text-muted">
+                        📊 Visit History: {scannedPerson.visitHistory.length} recorded visits
+                        {scannedPerson.totalVisits > scannedPerson.visitHistory.length && 
+                          ` (${scannedPerson.totalVisits} total)`}
+                      </small>
+                    </Col>
+                  </Row>
+                )}
               </Card.Body>
             </Card>
           </Col>

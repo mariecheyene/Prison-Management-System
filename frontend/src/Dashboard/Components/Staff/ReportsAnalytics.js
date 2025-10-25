@@ -1,45 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  Container, Row, Col, Card, Button, Form, 
+  Alert, Spinner, Table, Badge
+} from 'react-bootstrap';
+import { ToastContainer, toast } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
+import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 import { 
-  Box, 
-  Paper, 
-  Typography, 
-  Grid, 
-  Card, 
-  CardContent,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Button,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Chip,
-  CircularProgress,
-  Alert,
-  TextField
-} from '@mui/material';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import {
-  Download,
-  PictureAsPdf,
-  Analytics,
-  TrendingUp
-} from '@mui/icons-material';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+  FileText,
+  BarChart2,
+  TrendingUp,
+  RefreshCw
+} from 'react-feather';
 import axios from 'axios';
+import jsPDF from 'jspdf';
 
-const API_BASE_URL = 'http://localhost:5000'; // Add this constant
+const API_BASE_URL = 'http://localhost:5000';
 
 const ReportsAnalytics = () => {
   const [loading, setLoading] = useState(false);
@@ -75,7 +54,6 @@ const ReportsAnalytics = () => {
 
       console.log('🔄 Fetching REAL analytics data with params:', params);
 
-      // FIXED: Use the correct backend URL
       const response = await axios.get(`${API_BASE_URL}/analytics/reports`, { params });
       
       if (response.data.success) {
@@ -89,7 +67,6 @@ const ReportsAnalytics = () => {
           rawData: response.data.rawData
         });
 
-        // Show message if no data found
         if (response.data.chartData.length === 0) {
           setError('No visit logs found in the system for the selected period. Data will appear when visits are logged.');
         }
@@ -104,76 +81,251 @@ const ReportsAnalytics = () => {
     }
   };
 
-  // Export to PDF function
-  const exportToPDF = () => {
-    const doc = new jsPDF();
+  // Simple table creation without autoTable
+  const createTable = (doc, headers, data, startY) => {
     const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 20;
+    const tableWidth = pageWidth - (margin * 2);
+    const colCount = headers.length;
+    const colWidth = tableWidth / colCount;
     
-    // Title
-    doc.setFontSize(20);
-    doc.setTextColor(40, 40, 40);
-    doc.text('Prison Management System - Analytics Report', pageWidth / 2, 20, { align: 'center' });
+    let y = startY;
     
-    // Report details
-    doc.setFontSize(12);
-    doc.setTextColor(100, 100, 100);
-    doc.text(`Report Type: ${reportType.charAt(0).toUpperCase() + reportType.slice(1)}`, 20, 40);
-    doc.text(`Date Range: ${dateRange.startDate.toLocaleDateString()} - ${dateRange.endDate.toLocaleDateString()}`, 20, 50);
-    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 20, 60);
-    
-    let yPosition = 80;
-
-    // Summary Section
-    doc.setFontSize(16);
-    doc.setTextColor(40, 40, 40);
-    doc.text('Summary Statistics', 20, yPosition);
-    yPosition += 10;
-
+    // Draw table header
+    doc.setFillColor(66, 66, 66);
+    doc.setTextColor(255, 255, 255);
     doc.setFontSize(10);
-    const summaryRows = Object.entries(summaryData).map(([key, value]) => [
-      key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()),
-      typeof value === 'object' ? JSON.stringify(value) : value.toString()
-    ]);
-
-    doc.autoTable({
-      startY: yPosition,
-      head: [['Metric', 'Value']],
-      body: summaryRows,
-      theme: 'grid',
-      headStyles: { fillColor: [66, 66, 66] },
-      styles: { fontSize: 9, cellPadding: 3 }
+    doc.setFont(undefined, 'bold');
+    
+    headers.forEach((header, index) => {
+      doc.rect(margin + (index * colWidth), y, colWidth, 10, 'F');
+      doc.text(header, margin + (index * colWidth) + 2, y + 7);
     });
-
-    yPosition = doc.lastAutoTable.finalY + 20;
-
-    // Chart Data Table
-    doc.setFontSize(16);
-    doc.text('Detailed Data', 20, yPosition);
-    yPosition += 10;
-
-    if (chartData.length > 0) {
-      const tableHeaders = Object.keys(chartData[0]).map(key => 
-        key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())
-      );
+    
+    y += 10;
+    
+    // Draw table rows
+    doc.setTextColor(0, 0, 0);
+    doc.setFont(undefined, 'normal');
+    
+    data.forEach((row, rowIndex) => {
+      // Check if we need a new page
+      if (y > doc.internal.pageSize.getHeight() - 20) {
+        doc.addPage();
+        y = 20;
+        
+        // Redraw header on new page
+        doc.setFillColor(66, 66, 66);
+        doc.setTextColor(255, 255, 255);
+        headers.forEach((header, index) => {
+          doc.rect(margin + (index * colWidth), y, colWidth, 10, 'F');
+          doc.text(header, margin + (index * colWidth) + 2, y + 7);
+        });
+        y += 10;
+        doc.setTextColor(0, 0, 0);
+      }
       
-      const tableData = chartData.map(item => 
-        Object.values(item).map(value => 
-          typeof value === 'object' ? JSON.stringify(value) : value.toString()
-        )
-      );
-
-      doc.autoTable({
-        startY: yPosition,
-        head: [tableHeaders],
-        body: tableData,
-        theme: 'grid',
-        headStyles: { fillColor: [66, 66, 66] },
-        styles: { fontSize: 8, cellPadding: 2 }
+      row.forEach((cell, cellIndex) => {
+        const text = String(cell).substring(0, 30); // Limit text length
+        doc.text(text, margin + (cellIndex * colWidth) + 2, y + 7);
       });
-    }
+      
+      // Draw row separator
+      doc.setDrawColor(200, 200, 200);
+      doc.line(margin, y + 10, margin + tableWidth, y + 10);
+      
+      y += 10;
+    });
+    
+    return y + 10;
+  };
 
-    // Save the PDF
-    doc.save(`prison-analytics-${reportType}-${new Date().toISOString().split('T')[0]}.pdf`);
+  // Export to PDF function with proper title format
+  const exportToPDF = () => {
+    try {
+      const doc = new jsPDF();
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const margin = 20;
+      
+      // Official Title - Lanao Del Norte District Jail Region 10
+      doc.setFontSize(16);
+      doc.setTextColor(40, 40, 40);
+      doc.setFont(undefined, 'bold');
+      doc.text('Lanao Del Norte District Jail', pageWidth / 2, 20, { align: 'center' });
+      doc.text('Region 10', pageWidth / 2, 28, { align: 'center' });
+      
+      // Report Title
+      doc.setFontSize(14);
+      doc.text('Analytics and Visit Reports', pageWidth / 2, 40, { align: 'center' });
+      
+      // Report details
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.setFont(undefined, 'normal');
+      doc.text(`Report Type: ${reportType.charAt(0).toUpperCase() + reportType.slice(1)} Report`, margin, 55);
+      doc.text(`Date Range: ${dateRange.startDate.toLocaleDateString()} - ${dateRange.endDate.toLocaleDateString()}`, margin, 62);
+      doc.text(`Generated on: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}`, margin, 69);
+      
+      let yPosition = 85;
+
+      // Summary Section
+      doc.setFontSize(12);
+      doc.setTextColor(40, 40, 40);
+      doc.setFont(undefined, 'bold');
+      doc.text('SUMMARY STATISTICS', margin, yPosition);
+      yPosition += 10;
+
+      if (Object.keys(summaryData).length > 0) {
+        doc.setFontSize(9);
+        const summaryHeaders = ['METRIC', 'VALUE'];
+        const summaryRows = Object.entries(summaryData).map(([key, value]) => [
+          key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()),
+          typeof value === 'object' ? JSON.stringify(value) : String(value)
+        ]);
+
+        yPosition = createTable(doc, summaryHeaders, summaryRows, yPosition);
+      } else {
+        doc.setFontSize(9);
+        doc.setTextColor(100, 100, 100);
+        doc.text('No summary data available', margin, yPosition);
+        yPosition += 15;
+      }
+
+      // Chart Data Table
+      if (chartData.length > 0) {
+        doc.setFontSize(12);
+        doc.setTextColor(40, 40, 40);
+        doc.setFont(undefined, 'bold');
+        doc.text('DETAILED VISIT DATA', margin, yPosition);
+        yPosition += 10;
+
+        const tableHeaders = Object.keys(chartData[0]).map(key => 
+          key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()).toUpperCase()
+        );
+        
+        const tableData = chartData.map(item => 
+          Object.values(item).map(value => 
+            typeof value === 'object' ? JSON.stringify(value) : String(value)
+          )
+        );
+
+        yPosition = createTable(doc, tableHeaders, tableData, yPosition);
+      }
+
+      // Footer with official designation
+      doc.setFontSize(8);
+      doc.setTextColor(150, 150, 150);
+      doc.text('Official Document - Lanao Del Norte District Jail Management System', pageWidth / 2, doc.internal.pageSize.getHeight() - 15, { align: 'center' });
+      doc.text(`Page 1 of 1 - Confidential`, pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
+
+      // Save the PDF with official naming convention
+      const fileName = `LNDJ_${reportType}_Report_${new Date().toISOString().split('T')[0]}.pdf`;
+      doc.save(fileName);
+      toast.success('Official PDF report downloaded successfully!');
+      
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      toast.error('Failed to generate official report. Please try again.');
+    }
+  };
+
+  // Alternative simple PDF export with official format
+  const exportToPDFSimple = () => {
+    try {
+      const doc = new jsPDF();
+      const pageWidth = doc.internal.pageSize.getWidth();
+      
+      // Official Header
+      doc.setFontSize(16);
+      doc.setTextColor(40, 40, 40);
+      doc.setFont(undefined, 'bold');
+      doc.text('LANAO DEL NORTE DISTRICT JAIL', pageWidth / 2, 20, { align: 'center' });
+      doc.text('REGION 10', pageWidth / 2, 28, { align: 'center' });
+      
+      // Report Title
+      doc.setFontSize(14);
+      doc.text('VISITOR ANALYTICS REPORT', pageWidth / 2, 40, { align: 'center' });
+      
+      // Report info
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Report Type: ${reportType.toUpperCase()}`, 20, 55);
+      doc.text(`Period: ${dateRange.startDate.toLocaleDateString()} to ${dateRange.endDate.toLocaleDateString()}`, 20, 62);
+      doc.text(`Generated: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, 20, 69);
+      
+      let y = 85;
+      
+      // Summary Data
+      doc.setFontSize(11);
+      doc.setTextColor(0, 0, 0);
+      doc.text('SUMMARY STATISTICS:', 20, y);
+      y += 10;
+      
+      doc.setFontSize(9);
+      if (Object.keys(summaryData).length > 0) {
+        Object.entries(summaryData).forEach(([key, value], index) => {
+          if (y > 270) {
+            doc.addPage();
+            y = 20;
+          }
+          const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+          doc.text(`${label}: ${value}`, 25, y);
+          y += 6;
+        });
+      } else {
+        doc.text('No data available for selected period', 25, y);
+        y += 10;
+      }
+      
+      y += 10;
+      
+      // Chart Data
+      if (chartData.length > 0) {
+        doc.setFontSize(11);
+        doc.text('DETAILED VISIT RECORDS:', 20, y);
+        y += 10;
+        
+        doc.setFontSize(7);
+        const headers = Object.keys(chartData[0]);
+        
+        // Headers
+        headers.forEach((header, index) => {
+          const headerText = header.toUpperCase();
+          doc.text(headerText, 20 + (index * 35), y);
+        });
+        y += 5;
+        
+        // Data rows
+        chartData.slice(0, 25).forEach((row) => {
+          if (y > 270) {
+            doc.addPage();
+            y = 20;
+          }
+          headers.forEach((header, index) => {
+            const value = String(row[header] || '').substring(0, 12);
+            doc.text(value, 20 + (index * 35), y);
+          });
+          y += 4;
+        });
+        
+        if (chartData.length > 25) {
+          doc.text(`... and ${chartData.length - 25} more records`, 20, y);
+        }
+      }
+      
+      // Official Footer
+      doc.setFontSize(7);
+      doc.setTextColor(100, 100, 100);
+      doc.text('Official Document - Lanao Del Norte District Jail Management System', pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
+      
+      const fileName = `LNDJ_${reportType}_Analytics_${Date.now()}.pdf`;
+      doc.save(fileName);
+      toast.success('Official report downloaded successfully!');
+      
+    } catch (error) {
+      console.error('PDF export error:', error);
+      toast.error('Failed to generate official report. Please try again.');
+    }
   };
 
   // Render appropriate chart based on report type
@@ -182,25 +334,26 @@ const ReportsAnalytics = () => {
 
     if (!chartData || chartData.length === 0) {
       return (
-        <Box display="flex" justifyContent="center" alignItems="center" height={400} flexDirection="column">
-          <Typography variant="h6" color="textSecondary" gutterBottom>
-            No Visit Data Available
-          </Typography>
-          <Typography variant="body2" color="textSecondary" align="center">
+        <div className="text-center py-5">
+          <BarChart2 size={48} className="text-muted mb-3" />
+          <h5 className="text-muted">No Visit Data Available</h5>
+          <p className="text-muted">
             No visit logs found in the system for the selected period.
             <br />
             Data will appear automatically when visitors and guests start using the system.
-          </Typography>
-          <Box sx={{ mt: 2, p: 2, backgroundColor: '#f5f5f5', borderRadius: 1 }}>
-            <Typography variant="caption" color="textSecondary">
-              <strong>System Status:</strong><br />
-              • Visitors: {rawData.visitors || 0}<br />
-              • Guests: {rawData.guests || 0}<br />
-              • Inmates: {rawData.inmates || 0}<br />
-              • Visit Logs: {rawData.visitLogs || 0}
-            </Typography>
-          </Box>
-        </Box>
+          </p>
+          <Card className="bg-light mt-3">
+            <Card.Body className="py-2">
+              <small className="text-muted">
+                <strong>System Status:</strong><br />
+                • Visitors: {rawData.visitors || 0}<br />
+                • Guests: {rawData.guests || 0}<br />
+                • Inmates: {rawData.inmates || 0}<br />
+                • Visit Logs: {rawData.visitLogs || 0}
+              </small>
+            </Card.Body>
+          </Card>
+        </div>
       );
     }
 
@@ -295,213 +448,242 @@ const ReportsAnalytics = () => {
   const getSummaryCards = () => {
     if (Object.keys(summaryData).length === 0 || chartData.length === 0) {
       return (
-        <Grid item xs={12}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                No Analytics Data
-              </Typography>
-              <Typography variant="body2">
+        <Col xs={12}>
+          <Card className="border-0 bg-light">
+            <Card.Body className="text-center py-4">
+              <BarChart2 size={32} className="text-muted mb-2" />
+              <h6 className="text-muted mb-2">No Analytics Data</h6>
+              <p className="text-muted mb-0 small">
                 No visit logs found in the system. Analytics will appear when visitors start using the system.
-              </Typography>
-            </CardContent>
+              </p>
+            </Card.Body>
           </Card>
-        </Grid>
+        </Col>
       );
     }
 
     const keyMetrics = [
-      { key: 'totalVisits', label: 'Total Visits', color: '#1976d2' },
-      { key: 'totalVisitors', label: 'Total Visitors', color: '#2e7d32' },
-      { key: 'totalGuests', label: 'Total Guests', color: '#ed6c02' },
-      { key: 'avgDailyVisits', label: 'Avg Daily Visits', color: '#9c27b0' },
-      { key: 'daysWithVisits', label: 'Active Days', color: '#d32f2f' },
-      { key: 'averageDuration', label: 'Avg Duration', color: '#0288d1' }
+      { key: 'totalVisits', label: 'Total Visits', color: 'primary' },
+      { key: 'totalVisitors', label: 'Total Visitors', color: 'success' },
+      { key: 'totalGuests', label: 'Total Guests', color: 'warning' },
+      { key: 'avgDailyVisits', label: 'Avg Daily Visits', color: 'info' },
+      { key: 'daysWithVisits', label: 'Active Days', color: 'danger' },
+      { key: 'averageDuration', label: 'Avg Duration', color: 'secondary' }
     ];
 
     return keyMetrics
       .filter(metric => summaryData[metric.key] !== undefined)
       .map((metric, index) => (
-        <Grid item xs={12} sm={6} md={4} lg={2} key={metric.key}>
-          <Card sx={{ height: '100%', borderLeft: `4px solid ${metric.color}` }}>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom variant="overline" sx={{ fontSize: '0.7rem' }}>
+        <Col xs={12} sm={6} md={4} lg={2} key={metric.key} className="mb-3">
+          <Card className={`border-start border-${metric.color} border-4 h-100`}>
+            <Card.Body>
+              <small className="text-muted text-uppercase fw-bold">
                 {metric.label}
-              </Typography>
-              <Typography variant="h5" component="div" sx={{ fontWeight: 'bold', color: metric.color }}>
+              </small>
+              <h4 className={`mt-2 text-${metric.color} fw-bold`}>
                 {summaryData[metric.key]}
-              </Typography>
-            </CardContent>
+              </h4>
+            </Card.Body>
           </Card>
-        </Grid>
+        </Col>
       ));
   };
 
+  const formatDateForInput = (date) => {
+    return date.toISOString().split('T')[0];
+  };
+
   return (
-    <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Box p={3}>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-          <Typography variant="h4" gutterBottom>
-            <Analytics sx={{ mr: 2, verticalAlign: 'middle' }} />
-            Reports & Analytics
-          </Typography>
-          <Button
-            variant="contained"
-            startIcon={<PictureAsPdf />}
-            onClick={exportToPDF}
-            disabled={loading || chartData.length === 0}
-          >
-            Export PDF Report
-          </Button>
-        </Box>
+    <Container>
+      <ToastContainer />
+      
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <div>
+          <h2 style={{ fontFamily: "Poppins, sans-serif", fontWeight: "600", color: "#2c3e50" }}>
+            📊 Reports & Analytics
+          </h2>
+          <Badge bg="info" className="mb-2">
+            Lanao Del Norte District Jail - Region 10
+          </Badge>
+        </div>
+        <Button
+          variant="dark"
+          onClick={exportToPDFSimple}
+          disabled={loading || chartData.length === 0}
+        >
+          <FileText size={16} className="me-1" />
+          Export PDF Report
+        </Button>
+      </div>
 
-        {error && (
-          <Alert 
-            severity={error.includes('No visit logs') ? 'info' : 'error'} 
-            sx={{ mb: 2 }}
-            action={
-              <Button 
-                color="inherit" 
-                size="small" 
-                onClick={fetchAnalyticsData}
-              >
-                REFRESH
-              </Button>
-            }
-          >
-            {error}
-          </Alert>
-        )}
+      {error && (
+        <Alert 
+          variant={error.includes('No visit logs') ? 'info' : 'danger'} 
+          className="mb-3"
+        >
+          <div className="d-flex justify-content-between align-items-center">
+            <span>{error}</span>
+            <Button 
+              variant="outline-primary" 
+              size="sm" 
+              onClick={fetchAnalyticsData}
+            >
+              <RefreshCw size={14} className="me-1" />
+              REFRESH
+            </Button>
+          </div>
+        </Alert>
+      )}
 
-        {/* Filters */}
-        <Paper sx={{ p: 3, mb: 3 }}>
-          <Grid container spacing={3} alignItems="center">
-            <Grid item xs={12} md={3}>
-              <DatePicker
-                label="Start Date"
-                value={dateRange.startDate}
-                onChange={(date) => setDateRange(prev => ({ ...prev, startDate: date }))}
-                renderInput={(params) => <TextField {...params} fullWidth />}
-              />
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <DatePicker
-                label="End Date"
-                value={dateRange.endDate}
-                onChange={(date) => setDateRange(prev => ({ ...prev, endDate: date }))}
-                renderInput={(params) => <TextField {...params} fullWidth />}
-              />
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <FormControl fullWidth>
-                <InputLabel>Report Type</InputLabel>
-                <Select
+      {/* Filters */}
+      <Card className="mb-4 border-0 bg-light">
+        <Card.Body>
+          <Row className="g-3 align-items-center">
+            <Col md={3}>
+              <Form.Group>
+                <Form.Label className="fw-bold">Start Date</Form.Label>
+                <Form.Control
+                  type="date"
+                  value={formatDateForInput(dateRange.startDate)}
+                  onChange={(e) => setDateRange(prev => ({ 
+                    ...prev, 
+                    startDate: new Date(e.target.value) 
+                  }))}
+                />
+              </Form.Group>
+            </Col>
+            <Col md={3}>
+              <Form.Group>
+                <Form.Label className="fw-bold">End Date</Form.Label>
+                <Form.Control
+                  type="date"
+                  value={formatDateForInput(dateRange.endDate)}
+                  onChange={(e) => setDateRange(prev => ({ 
+                    ...prev, 
+                    endDate: new Date(e.target.value) 
+                  }))}
+                />
+              </Form.Group>
+            </Col>
+            <Col md={3}>
+              <Form.Group>
+                <Form.Label className="fw-bold">Report Type</Form.Label>
+                <Form.Select
                   value={reportType}
-                  label="Report Type"
                   onChange={(e) => setReportType(e.target.value)}
                 >
-                  <MenuItem value="daily">Daily Visitors</MenuItem>
-                  <MenuItem value="weekly">Weekly Trends</MenuItem>
-                  <MenuItem value="monthly">Monthly Overview</MenuItem>
-                  <MenuItem value="demographic">Demographics</MenuItem>
-                  <MenuItem value="performance">Performance Metrics</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={3}>
+                  <option value="daily">Daily Visitors</option>
+                  <option value="weekly">Weekly Trends</option>
+                  <option value="monthly">Monthly Overview</option>
+                  <option value="demographic">Demographics</option>
+                  <option value="performance">Performance Metrics</option>
+                </Form.Select>
+              </Form.Group>
+            </Col>
+            <Col md={3}>
+              <Form.Label className="fw-bold d-block">&nbsp;</Form.Label>
               <Button
-                variant="outlined"
+                variant="outline-dark"
                 onClick={fetchAnalyticsData}
                 disabled={loading}
-                fullWidth
-                startIcon={loading ? <CircularProgress size={20} /> : <TrendingUp />}
+                className="w-100"
               >
-                {loading ? 'Loading...' : 'Refresh Data'}
+                {loading ? (
+                  <>
+                    <Spinner animation="border" size="sm" className="me-2" />
+                    Loading...
+                  </>
+                ) : (
+                  <>
+                    <TrendingUp size={16} className="me-1" />
+                    Refresh Data
+                  </>
+                )}
               </Button>
-            </Grid>
-          </Grid>
-        </Paper>
+            </Col>
+          </Row>
+        </Card.Body>
+      </Card>
 
-        {/* Summary Cards */}
-        <Grid container spacing={3} sx={{ mb: 3 }}>
-          {getSummaryCards()}
-        </Grid>
+      {/* Summary Cards */}
+      <Row className="mb-4">
+        {getSummaryCards()}
+      </Row>
 
-        {/* Chart */}
-        <Paper sx={{ p: 3, mb: 3 }} ref={chartRef}>
-          <Typography variant="h6" gutterBottom>
-            {reportType.charAt(0).toUpperCase() + reportType.slice(1)} Analytics
+      {/* Chart */}
+      <Card className="mb-4 border-0">
+        <Card.Body>
+          <div className="d-flex justify-content-between align-items-center mb-3">
+            <h5 className="mb-0">
+              {reportType.charAt(0).toUpperCase() + reportType.slice(1)} Analytics
+            </h5>
             {chartData.length > 0 && (
-              <Chip 
-                label={`${chartData.length} data points`} 
-                size="small" 
-                sx={{ ml: 2 }} 
-                color="primary" 
-                variant="outlined"
-              />
+              <Badge bg="primary" className="fs-6">
+                {chartData.length} data points
+              </Badge>
             )}
-          </Typography>
+          </div>
           
           {loading ? (
-            <Box display="flex" justifyContent="center" alignItems="center" height={400}>
-              <CircularProgress />
-              <Typography variant="body2" sx={{ ml: 2 }}>
-                Loading analytics data...
-              </Typography>
-            </Box>
+            <div className="text-center py-5">
+              <Spinner animation="border" role="status" className="me-2" />
+              <span>Loading analytics data...</span>
+            </div>
           ) : (
             renderChart()
           )}
-        </Paper>
+        </Card.Body>
+      </Card>
 
-        {/* Data Table */}
-        <Paper sx={{ p: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            Raw Data {chartData.length > 0 && `(${chartData.length} records)`}
-          </Typography>
+      {/* Data Table */}
+      <Card className="border-0">
+        <Card.Body>
+          <div className="d-flex justify-content-between align-items-center mb-3">
+            <h5 className="mb-0">
+              Raw Data {chartData.length > 0 && `(${chartData.length} records)`}
+            </h5>
+          </div>
           
           {chartData.length === 0 ? (
-            <Box display="flex" justifyContent="center" alignItems="center" height={100}>
-              <Typography variant="body2" color="textSecondary">
-                No data to display
-              </Typography>
-            </Box>
+            <div className="text-center py-4">
+              <p className="text-muted mb-0">No data to display</p>
+            </div>
           ) : (
             <>
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      {chartData.length > 0 && Object.keys(chartData[0]).map((key) => (
-                        <TableCell key={key} sx={{ fontWeight: 'bold' }}>
-                          {key.charAt(0).toUpperCase() + key.slice(1)}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {chartData.slice(0, 10).map((row, index) => (
-                      <TableRow key={index}>
-                        {Object.values(row).map((value, cellIndex) => (
-                          <TableCell key={cellIndex}>
-                            {typeof value === 'object' ? JSON.stringify(value) : value}
-                          </TableCell>
-                        ))}
-                      </TableRow>
+              <Table striped bordered hover responsive className="bg-white">
+                <thead className="table-dark">
+                  <tr>
+                    {chartData.length > 0 && Object.keys(chartData[0]).map((key) => (
+                      <th key={key}>
+                        {key.charAt(0).toUpperCase() + key.slice(1)}
+                      </th>
                     ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+                  </tr>
+                </thead>
+                <tbody>
+                  {chartData.slice(0, 10).map((row, index) => (
+                    <tr key={index}>
+                      {Object.values(row).map((value, cellIndex) => (
+                        <td key={cellIndex}>
+                          {typeof value === 'object' ? JSON.stringify(value) : value}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
               {chartData.length > 10 && (
-                <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
-                  Showing first 10 of {chartData.length} records
-                </Typography>
+                <div className="text-center mt-2">
+                  <small className="text-muted">
+                    Showing first 10 of {chartData.length} records
+                  </small>
+                </div>
               )}
             </>
           )}
-        </Paper>
-      </Box>
-    </LocalizationProvider>
+        </Card.Body>
+      </Card>
+    </Container>
   );
 };
 

@@ -13,6 +13,7 @@ import {
   Edit2, 
   Trash2, 
   Download,
+  Upload,
   Printer,
   User,
   Grid
@@ -24,6 +25,7 @@ const Guest = () => {
   const [showModal, setShowModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [editingGuest, setEditingGuest] = useState(null);
   const [selectedGuest, setSelectedGuest] = useState(null);
   const [selectedQRGuest, setSelectedQRGuest] = useState(null);
@@ -31,6 +33,9 @@ const Guest = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchBy, setSearchBy] = useState('lastName');
   const [imageFile, setImageFile] = useState(null);
+  const [importFile, setImportFile] = useState(null);
+  const [importProgress, setImportProgress] = useState(0);
+  const [isImporting, setIsImporting] = useState(false);
 
   const searchOptions = [
     { value: 'lastName', label: 'Last Name' },
@@ -52,7 +57,6 @@ const Guest = () => {
     setIsLoading(true);
     try {
       const response = await axios.get("http://localhost:5000/guests");
-      // REMOVED THE FILTER - NOW SHOWS ALL GUESTS
       setGuests(response.data);
     } catch (error) {
       console.error("Error fetching guests:", error);
@@ -173,6 +177,18 @@ const Guest = () => {
     setImageFile(file);
   };
 
+  const handleImportFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
+        setImportFile(file);
+      } else {
+        toast.error('Please select a valid CSV file');
+        setImportFile(null);
+      }
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
@@ -234,6 +250,78 @@ const Guest = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleImport = async (e) => {
+    e.preventDefault();
+    
+    if (!importFile) {
+      toast.error('Please select a CSV file to import');
+      return;
+    }
+
+    setIsImporting(true);
+    setImportProgress(0);
+
+    try {
+      const formData = new FormData();
+      formData.append('csvFile', importFile);
+
+      // Use the guests import endpoint
+      const response = await axios.post('http://localhost:5000/guests/import', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        onUploadProgress: (progressEvent) => {
+          const progress = (progressEvent.loaded / progressEvent.total) * 100;
+          setImportProgress(Math.round(progress));
+        },
+      });
+
+      toast.success(`Successfully imported ${response.data.imported} guests!`);
+      if (response.data.errors && response.data.errors.length > 0) {
+        console.warn('Import errors:', response.data.errors);
+        toast.warning(`${response.data.errors.length} records had errors. Check console for details.`);
+      }
+      
+      setShowImportModal(false);
+      setImportFile(null);
+      setImportProgress(0);
+      fetchGuests();
+    } catch (error) {
+      console.error('Error importing guests:', error);
+      const errorMessage = error.response?.data?.message || 'Failed to import guests';
+      toast.error(errorMessage);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const downloadTemplate = () => {
+    const templateHeaders = [
+      'lastName', 'firstName', 'middleName', 'extension', 
+      'dateOfBirth', 'sex', 'address', 'contact', 'visitPurpose'
+    ];
+
+    const templateData = [
+      templateHeaders,
+      ['Doe', 'John', 'Michael', 'Jr', '1990-05-15', 'Male', '123 Main St, City, State', '09123456789', 'Official Business'],
+      ['Smith', 'Jane', 'Marie', '', '1985-08-22', 'Female', '456 Oak Ave, City, State', '09987654321', 'Meeting']
+    ];
+
+    const csvContent = templateData
+      .map(row => row.map(field => `"${field}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'guest_import_template.csv';
+    link.click();
+    window.URL.revokeObjectURL(url);
+    
+    toast.success('Template downloaded successfully!');
   };
 
   const exportToCSV = () => {
@@ -368,7 +456,6 @@ const Guest = () => {
     }
   };
 
-  // Custom print functionality like in Visitor.js
   const printGuestDetails = () => {
     const printWindow = window.open('', '_blank');
     const timeStatus = getTimeStatus(selectedGuest);
@@ -617,7 +704,6 @@ const Guest = () => {
     `);
     printWindow.document.close();
     
-    // Wait for images to load before printing
     printWindow.onload = function() {
       setTimeout(() => {
         printWindow.print();
@@ -639,6 +725,10 @@ const Guest = () => {
           </Badge>
         </div>
         <div className="d-flex gap-2">
+          <Button variant="outline-secondary" size="sm" onClick={() => setShowImportModal(true)}>
+            <Upload size={16} className="me-1" />
+            Import CSV
+          </Button>
           <Button variant="outline-dark" size="sm" onClick={exportToCSV}>
             <Download size={16} className="me-1" />
             Export CSV
@@ -706,7 +796,6 @@ const Guest = () => {
               <th>Full Name</th>
               <th>Gender</th>
               <th>Visit Purpose</th>
-              {/* STATUS COLUMN REMOVED */}
               <th>Last Visit Date</th>
               <th>Time Status</th>
               <th>Violation Type</th>
@@ -720,7 +809,6 @@ const Guest = () => {
                 <td>{guest.fullName}</td>
                 <td>{guest.sex}</td>
                 <td>{guest.visitPurpose}</td>
-                {/* STATUS CELL REMOVED */}
                 <td>
                   {guest.dateVisited ? (
                     <Badge bg="info">
@@ -955,6 +1043,81 @@ const Guest = () => {
             </Button>
             <Button variant="dark" type="submit" disabled={isLoading}>
               {isLoading ? <Spinner size="sm" /> : (editingGuest ? 'Update' : 'Add') + ' Guest'}
+            </Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
+
+      {/* Import Modal */}
+      <Modal show={showImportModal} onHide={() => setShowImportModal(false)}>
+        <Modal.Header closeButton>
+          <Modal.Title>Import Guests from CSV</Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={handleImport}>
+          <Modal.Body>
+            <Alert variant="info" className="mb-3">
+              <strong>Instructions:</strong> Upload a CSV file with guest information. 
+              The file should include columns for: lastName, firstName, middleName, extension, 
+              dateOfBirth, sex, address, contact, and visitPurpose.
+            </Alert>
+
+            <Form.Group className="mb-3">
+              <Form.Label>CSV File *</Form.Label>
+              <Form.Control
+                type="file"
+                accept=".csv"
+                onChange={handleImportFileChange}
+                required
+              />
+              <Form.Text className="text-muted">
+                Select a CSV file to import guest data
+              </Form.Text>
+            </Form.Group>
+
+            {isImporting && (
+              <div className="mb-3">
+                <div className="d-flex justify-content-between align-items-center">
+                  <span>Importing guests...</span>
+                  <span>{importProgress}%</span>
+                </div>
+                <div className="progress">
+                  <div 
+                    className="progress-bar progress-bar-striped progress-bar-animated" 
+                    style={{ width: `${importProgress}%` }}
+                  ></div>
+                </div>
+              </div>
+            )}
+
+            <div className="d-flex justify-content-between align-items-center mt-4">
+              <Button variant="outline-secondary" size="sm" onClick={downloadTemplate}>
+                Download Template
+              </Button>
+              <div className="text-muted small">
+                Need help with the format?
+              </div>
+            </div>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setShowImportModal(false)}>
+              Cancel
+            </Button>
+            <Button 
+              variant="dark" 
+              type="submit" 
+              disabled={!importFile || isImporting}
+            >
+              {isImporting ? (
+                <>
+                  <Spinner size="sm" className="me-2" />
+                  Importing...
+                </>
+              ) : (
+                <>
+                  <Upload size={16} className="me-1" />
+                  Import Guests
+                </>
+              )}
             </Button>
           </Modal.Footer>
         </Form>

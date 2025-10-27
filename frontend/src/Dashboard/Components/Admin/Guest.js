@@ -45,6 +45,76 @@ const Guest = () => {
     { value: 'violationType', label: 'Violation Type' }
   ];
 
+  // Define the functions that were causing ESLint errors
+  const exportToCSV = () => {
+    const headers = [
+      'Guest ID', 'Last Name', 'First Name', 'Middle Name', 'Extension',
+      'Date of Birth', 'Age', 'Gender', 'Address', 'Contact',
+      'Visit Purpose', 'Status', 'Violation Type', 'Violation Details', 'Date Visited', 'Time In', 'Time Out'
+    ];
+
+    const csvData = guests.map(guest => [
+      guest.id,
+      guest.lastName,
+      guest.firstName,
+      guest.middleName || '',
+      guest.extension || '',
+      guest.dateOfBirth ? new Date(guest.dateOfBirth).toLocaleDateString() : '',
+      guest.age || '',
+      guest.sex,
+      guest.address,
+      guest.contact,
+      guest.visitPurpose,
+      guest.status || 'approved',
+      guest.violationType || 'No violation',
+      guest.violationDetails || 'No violation data',
+      guest.dateVisited ? new Date(guest.dateVisited).toLocaleDateString() : 'Not visited',
+      guest.timeIn || 'Not recorded',
+      guest.timeOut || 'Not recorded'
+    ]);
+
+    const csvContent = [headers, ...csvData]
+      .map(row => row.map(field => `"${field}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `guests_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    window.URL.revokeObjectURL(url);
+    
+    toast.success(`Exported ${guests.length} guests to CSV`);
+  };
+
+  const downloadTemplate = () => {
+    const templateHeaders = [
+      'lastName', 'firstName', 'middleName', 'extension', 
+      'dateOfBirth', 'sex', 'address', 'contact', 'visitPurpose'
+    ];
+
+    const templateData = [
+      templateHeaders,
+      ['Doe', 'John', 'Michael', 'Jr', '1990-05-15', 'Male', '123 Main St, City, State', '09123456789', 'Official Business'],
+      ['Smith', 'Jane', 'Marie', '', '1985-08-22', 'Female', '456 Oak Ave, City, State', '09987654321', 'Meeting']
+    ];
+
+    const csvContent = templateData
+      .map(row => row.map(field => `"${field}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'guest_import_template.csv';
+    link.click();
+    window.URL.revokeObjectURL(url);
+    
+    toast.success('Template downloaded successfully!');
+  };
+
   useEffect(() => {
     fetchGuests();
   }, []);
@@ -252,25 +322,20 @@ const Guest = () => {
     }
   };
 
-  const handleImport = async (e) => {
-    e.preventDefault();
-    
+  const handleImport = async () => {
     if (!importFile) {
-      toast.error('Please select a CSV file to import');
+      toast.error('Please select a CSV file');
       return;
     }
 
     setIsImporting(true);
-    setImportProgress(0);
+    const formData = new FormData();
+    formData.append('csvFile', importFile);
 
     try {
-      const formData = new FormData();
-      formData.append('csvFile', importFile);
-
-      // Use the guests import endpoint
       const response = await axios.post('http://localhost:5000/guests/import', formData, {
         headers: {
-          'Content-Type': 'multipart/form-data',
+          'Content-Type': 'multipart/form-data'
         },
         onUploadProgress: (progressEvent) => {
           const progress = (progressEvent.loaded / progressEvent.total) * 100;
@@ -295,75 +360,6 @@ const Guest = () => {
     } finally {
       setIsImporting(false);
     }
-  };
-
-  const downloadTemplate = () => {
-    const templateHeaders = [
-      'lastName', 'firstName', 'middleName', 'extension', 
-      'dateOfBirth', 'sex', 'address', 'contact', 'visitPurpose'
-    ];
-
-    const templateData = [
-      templateHeaders,
-      ['Doe', 'John', 'Michael', 'Jr', '1990-05-15', 'Male', '123 Main St, City, State', '09123456789', 'Official Business'],
-      ['Smith', 'Jane', 'Marie', '', '1985-08-22', 'Female', '456 Oak Ave, City, State', '09987654321', 'Meeting']
-    ];
-
-    const csvContent = templateData
-      .map(row => row.map(field => `"${field}"`).join(','))
-      .join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'guest_import_template.csv';
-    link.click();
-    window.URL.revokeObjectURL(url);
-    
-    toast.success('Template downloaded successfully!');
-  };
-
-  const exportToCSV = () => {
-    const headers = [
-      'Guest ID', 'Last Name', 'First Name', 'Middle Name', 'Extension',
-      'Date of Birth', 'Age', 'Gender', 'Address', 'Contact',
-      'Visit Purpose', 'Status', 'Violation Type', 'Violation Details', 'Date Visited', 'Time In', 'Time Out'
-    ];
-
-    const csvData = guests.map(guest => [
-      guest.id,
-      guest.lastName,
-      guest.firstName,
-      guest.middleName || '',
-      guest.extension || '',
-      guest.dateOfBirth ? new Date(guest.dateOfBirth).toLocaleDateString() : '',
-      guest.age || '',
-      guest.sex,
-      guest.address,
-      guest.contact,
-      guest.visitPurpose,
-      guest.status || 'approved',
-      guest.violationType || 'No violation',
-      guest.violationDetails || 'No violation data',
-      guest.dateVisited ? new Date(guest.dateVisited).toLocaleDateString() : 'Not visited',
-      guest.timeIn || 'Not recorded',
-      guest.timeOut || 'Not recorded'
-    ]);
-
-    const csvContent = [headers, ...csvData]
-      .map(row => row.map(field => `"${field}"`).join(','))
-      .join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `guests_${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
-    window.URL.revokeObjectURL(url);
-    
-    toast.success(`Exported ${guests.length} guests to CSV`);
   };
 
   const downloadQRCode = () => {
@@ -477,6 +473,24 @@ const Guest = () => {
               border-bottom: 3px solid #333; 
               padding-bottom: 15px; 
             }
+            .header h1 {
+              margin: 0;
+              font-size: 24px;
+              font-weight: bold;
+              color: #2c3e50;
+            }
+            .header h2 {
+              margin: 5px 0 0 0;
+              font-size: 18px;
+              font-weight: normal;
+              color: #2c3e50;
+            }
+            .header h3 {
+              margin: 10px 0 0 0;
+              font-size: 16px;
+              font-weight: bold;
+              color: #2c3e50;
+            }
             .section { 
               margin-bottom: 25px; 
               padding: 15px;
@@ -579,9 +593,9 @@ const Guest = () => {
         </head>
         <body>
           <div class="header">
-            <h1>PRISON MANAGEMENT SYSTEM</h1>
-            <h2>GUEST DETAILS RECORD</h2>
-            <h3>Guest ID: ${selectedGuest?.id}</h3>
+            <h1>LANAO DEL NORTE DISTRICT JAIL</h1>
+            <h2>Region 10</h2>
+            <h3>GUEST DETAILS RECORD - ID: ${selectedGuest?.id}</h3>
           </div>
           
           ${selectedGuest ? `
@@ -695,7 +709,7 @@ const Guest = () => {
             <div class="section">
               <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
                 <p><strong>Generated on:</strong> ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
-                <p><em>Official Document - Prison Management System</em></p>
+                <p><em>Official Document - Lanao Del Norte District Jail, Region 10</em></p>
               </div>
             </div>
           ` : ''}
@@ -725,14 +739,17 @@ const Guest = () => {
           </Badge>
         </div>
         <div className="d-flex gap-2">
-          <Button variant="outline-secondary" size="sm" onClick={() => setShowImportModal(true)}>
-            <Upload size={16} className="me-1" />
-            Import CSV
-          </Button>
+          {/* Export CSV Button - First (outline-dark) */}
           <Button variant="outline-dark" size="sm" onClick={exportToCSV}>
             <Download size={16} className="me-1" />
             Export CSV
           </Button>
+          {/* Import CSV Button - Second (outline-dark) */}
+          <Button variant="outline-dark" size="sm" onClick={() => setShowImportModal(true)}>
+            <Upload size={16} className="me-1" />
+            Import CSV
+          </Button>
+          {/* Add Guest Button - Third (dark) */}
           <Button variant="dark" onClick={handleAdd}>
             <Plus size={16} className="me-1" />
             Add Guest
@@ -1053,74 +1070,61 @@ const Guest = () => {
         <Modal.Header closeButton>
           <Modal.Title>Import Guests from CSV</Modal.Title>
         </Modal.Header>
-        <Form onSubmit={handleImport}>
-          <Modal.Body>
-            <Alert variant="info" className="mb-3">
-              <strong>Instructions:</strong> Upload a CSV file with guest information. 
-              The file should include columns for: lastName, firstName, middleName, extension, 
-              dateOfBirth, sex, address, contact, and visitPurpose.
-            </Alert>
+        <Modal.Body>
+          <Form.Group>
+            <Form.Label>Select CSV File</Form.Label>
+            <Form.Control
+              type="file"
+              accept=".csv"
+              onChange={handleImportFileChange}
+            />
+            <Form.Text className="text-muted">
+              CSV should include columns: lastName, firstName, middleName, extension, dateOfBirth, sex, address, contact, visitPurpose
+            </Form.Text>
+          </Form.Group>
 
-            <Form.Group className="mb-3">
-              <Form.Label>CSV File *</Form.Label>
-              <Form.Control
-                type="file"
-                accept=".csv"
-                onChange={handleImportFileChange}
-                required
-              />
-              <Form.Text className="text-muted">
-                Select a CSV file to import guest data
-              </Form.Text>
-            </Form.Group>
-
-            {isImporting && (
-              <div className="mb-3">
-                <div className="d-flex justify-content-between align-items-center">
-                  <span>Importing guests...</span>
-                  <span>{importProgress}%</span>
-                </div>
-                <div className="progress">
-                  <div 
-                    className="progress-bar progress-bar-striped progress-bar-animated" 
-                    style={{ width: `${importProgress}%` }}
-                  ></div>
-                </div>
+          {isImporting && (
+            <div className="mb-3 mt-3">
+              <div className="d-flex justify-content-between align-items-center">
+                <span>Importing guests...</span>
+                <span>{importProgress}%</span>
               </div>
-            )}
-
-            <div className="d-flex justify-content-between align-items-center mt-4">
-              <Button variant="outline-secondary" size="sm" onClick={downloadTemplate}>
-                Download Template
-              </Button>
-              <div className="text-muted small">
-                Need help with the format?
+              <div className="progress">
+                <div 
+                  className="progress-bar progress-bar-striped progress-bar-animated" 
+                  style={{ width: `${importProgress}%` }}
+                ></div>
               </div>
             </div>
-          </Modal.Body>
-          <Modal.Footer>
-            <Button variant="secondary" onClick={() => setShowImportModal(false)}>
-              Cancel
+          )}
+
+          <div className="d-flex justify-content-between align-items-center mt-4">
+            <Button variant="outline-secondary" size="sm" onClick={downloadTemplate}>
+              Download Template
             </Button>
-            <Button 
-              variant="dark" 
-              type="submit" 
-              disabled={!importFile || isImporting}
-            >
-              {isImporting ? (
-                <>
-                  <Spinner size="sm" className="me-2" />
-                  Importing...
-                </>
-              ) : (
-                <>
-                  <Upload size={16} className="me-1" />
-                  Import Guests
-                </>
-              )}
-            </Button>
-          </Modal.Footer>
-        </Form>
+            <div className="text-muted small">
+              Need help with the format?
+            </div>
+          </div>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setShowImportModal(false)}>
+            Cancel
+          </Button>
+          <Button variant="dark" onClick={handleImport} disabled={!importFile || isImporting}>
+            {isImporting ? (
+              <>
+                <Spinner size="sm" className="me-2" />
+                Importing...
+              </>
+            ) : (
+              <>
+                <Upload size={16} className="me-1" />
+                Import CSV
+              </>
+            )}
+          </Button>
+        </Modal.Footer>
       </Modal>
 
       {/* View Modal */}

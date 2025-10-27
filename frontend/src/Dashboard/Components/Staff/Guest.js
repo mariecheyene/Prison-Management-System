@@ -332,260 +332,277 @@ const Guest = () => {
 
   // Custom print functionality like in Visitor.js
   const printGuestDetails = () => {
-    const printWindow = window.open('', '_blank');
-    const timeStatus = getTimeStatus(selectedGuest);
-    
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Guest Details - ${selectedGuest?.id}</title>
-          <style>
-            body { 
-              font-family: Arial, sans-serif; 
-              margin: 20px; 
-              line-height: 1.4;
-              color: #333;
-            }
-            .header { 
-              text-align: center; 
-              margin-bottom: 30px; 
-              border-bottom: 3px solid #333; 
-              padding-bottom: 15px; 
-            }
-            .section { 
-              margin-bottom: 25px; 
-              padding: 15px;
-              border: 1px solid #ddd;
-              border-radius: 5px;
-            }
-            .section h3 {
-              margin-top: 0;
-              color: #2c3e50;
-              border-bottom: 1px solid #eee;
-              padding-bottom: 8px;
-            }
-            .info-grid {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 15px;
-            }
-            .info-item {
-              margin-bottom: 10px;
-            }
-            .label { 
-              font-weight: bold; 
-              color: #2c3e50;
-              display: inline-block;
-              width: 140px;
-            }
-            .full-width {
-              grid-column: 1 / -1;
-            }
-            .violation { 
-              background-color: #ffe6e6; 
-              border-left: 4px solid #dc3545;
-              padding: 10px;
-              margin: 10px 0;
-            }
-            .qr-code {
-              text-align: center;
-              margin: 20px 0;
-            }
-            .qr-code img {
-              max-width: 300px;
-              height: auto;
-              border: 1px solid #ddd;
-              border-radius: 5px;
-            }
-            .guest-photo {
-              text-align: center;
-              margin: 20px 0;
-            }
-            .guest-photo img {
-              max-width: 200px;
-              max-height: 200px;
-              object-fit: cover;
-              border: 1px solid #ddd;
-              border-radius: 5px;
-            }
-            .photo-container {
-              display: flex;
+  const printWindow = window.open('', '_blank');
+  const timeStatus = getTimeStatus(selectedGuest);
+  
+  printWindow.document.write(`
+    <html>
+      <head>
+        <title>Guest Details - ${selectedGuest?.id}</title>
+        <style>
+          body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
+            line-height: 1.4;
+            color: #333;
+          }
+          .header { 
+            text-align: center; 
+            margin-bottom: 30px; 
+            border-bottom: 3px solid #333; 
+            padding-bottom: 15px; 
+          }
+          .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+          }
+          .header h2 {
+            margin: 5px 0 0 0;
+            font-size: 18px;
+            font-weight: normal;
+            color: #2c3e50;
+          }
+          .header h3 {
+            margin: 10px 0 0 0;
+            font-size: 16px;
+            font-weight: bold;
+            color: #2c3e50;
+          }
+          .section { 
+            margin-bottom: 25px; 
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+          }
+          .section h3 {
+            margin-top: 0;
+            color: #2c3e50;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 8px;
+          }
+          .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+          }
+          .info-item {
+            margin-bottom: 10px;
+          }
+          .label { 
+            font-weight: bold; 
+            color: #2c3e50;
+            display: inline-block;
+            width: 140px;
+          }
+          .full-width {
+            grid-column: 1 / -1;
+          }
+          .violation { 
+            background-color: #ffe6e6; 
+            border-left: 4px solid #dc3545;
+            padding: 10px;
+            margin: 10px 0;
+          }
+          .qr-code {
+            text-align: center;
+            margin: 20px 0;
+          }
+          .qr-code img {
+            max-width: 300px;
+            height: auto;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+          }
+          .guest-photo {
+            text-align: center;
+            margin: 20px 0;
+          }
+          .guest-photo img {
+            max-width: 200px;
+            max-height: 200px;
+            object-fit: cover;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+          }
+          .photo-container {
+            display: flex;
+            justify-content: space-around;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin: 20px 0;
+          }
+          .photo-item {
+            text-align: center;
+          }
+          .photo-item h4 {
+            margin-bottom: 10px;
+            color: #2c3e50;
+          }
+          .time-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: white;
+            font-weight: bold;
+          }
+          .status-success { background-color: #28a745; }
+          .status-info { background-color: #17a2b8; }
+          .status-secondary { background-color: #6c757d; }
+          .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: white;
+            font-weight: bold;
+            margin-left: 5px;
+          }
+          @media print {
+            body { margin: 10px; }
+            .section { border: none; }
+            .photo-container { 
+              display: flex; 
               justify-content: space-around;
-              align-items: flex-start;
-              flex-wrap: wrap;
-              gap: 20px;
-              margin: 20px 0;
             }
-            .photo-item {
-              text-align: center;
-            }
-            .photo-item h4 {
-              margin-bottom: 10px;
-              color: #2c3e50;
-            }
-            .time-status {
-              display: inline-block;
-              padding: 4px 8px;
-              border-radius: 4px;
-              color: white;
-              font-weight: bold;
-            }
-            .status-success { background-color: #28a745; }
-            .status-info { background-color: #17a2b8; }
-            .status-secondary { background-color: #6c757d; }
-            .status-badge {
-              display: inline-block;
-              padding: 4px 8px;
-              border-radius: 4px;
-              color: white;
-              font-weight: bold;
-              margin-left: 5px;
-            }
-            @media print {
-              body { margin: 10px; }
-              .section { border: none; }
-              .photo-container { 
-                display: flex; 
-                justify-content: space-around;
-              }
-              .header { border-bottom: 2px solid #333; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>PRISON MANAGEMENT SYSTEM</h1>
-            <h2>GUEST DETAILS RECORD</h2>
-            <h3>Guest ID: ${selectedGuest?.id}</h3>
+            .header { border-bottom: 2px solid #333; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>LANAO DEL NORTE DISTRICT JAIL</h1>
+          <h2>Region 10</h2>
+          <h3>GUEST DETAILS RECORD - ID: ${selectedGuest?.id}</h3>
+        </div>
+        
+        ${selectedGuest ? `
+          <div class="section">
+            <h3>Time Tracking Information</h3>
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="label">Visit Date:</span> ${selectedGuest.dateVisited ? new Date(selectedGuest.dateVisited).toLocaleDateString() : 'Not yet visited'}
+              </div>
+              <div class="info-item">
+                <span class="label">Time In:</span> ${selectedGuest.timeIn || 'Not recorded'}
+              </div>
+              <div class="info-item">
+                <span class="label">Time Out:</span> ${selectedGuest.timeOut || 'Not recorded'}
+              </div>
+              <div class="info-item">
+                <span class="label">Time Status:</span> 
+                <span class="time-status status-${timeStatus.variant}">${timeStatus.text}</span>
+              </div>
+              <div class="info-item">
+                <span class="label">Guest Status:</span> 
+                <span class="status-badge" style="background-color: ${
+                  selectedGuest.status === 'approved' ? '#28a745' :
+                  selectedGuest.status === 'completed' ? '#17a2b8' :
+                  selectedGuest.status === 'pending' ? '#ffc107' :
+                  selectedGuest.status === 'rejected' ? '#dc3545' : '#6c757d'
+                }">${selectedGuest.status?.toUpperCase() || 'APPROVED'}</span>
+              </div>
+            </div>
           </div>
-          
-          ${selectedGuest ? `
-            <div class="section">
-              <h3>Time Tracking Information</h3>
-              <div class="info-grid">
-                <div class="info-item">
-                  <span class="label">Visit Date:</span> ${selectedGuest.dateVisited ? new Date(selectedGuest.dateVisited).toLocaleDateString() : 'Not yet visited'}
-                </div>
-                <div class="info-item">
-                  <span class="label">Time In:</span> ${selectedGuest.timeIn || 'Not recorded'}
-                </div>
-                <div class="info-item">
-                  <span class="label">Time Out:</span> ${selectedGuest.timeOut || 'Not recorded'}
-                </div>
-                <div class="info-item">
-                  <span class="label">Time Status:</span> 
-                  <span class="time-status status-${timeStatus.variant}">${timeStatus.text}</span>
-                </div>
-                <div class="info-item">
-                  <span class="label">Guest Status:</span> 
-                  <span class="status-badge" style="background-color: ${
-                    selectedGuest.status === 'approved' ? '#28a745' :
-                    selectedGuest.status === 'completed' ? '#17a2b8' :
-                    selectedGuest.status === 'pending' ? '#ffc107' :
-                    selectedGuest.status === 'rejected' ? '#dc3545' : '#6c757d'
-                  }">${selectedGuest.status?.toUpperCase() || 'APPROVED'}</span>
-                </div>
-              </div>
-            </div>
 
-            <div class="section">
-              <h3>Identification</h3>
-              <div class="photo-container">
-                ${selectedGuest.photo ? `
-                  <div class="photo-item">
-                    <h4>Guest Photo</h4>
-                    <div class="guest-photo">
-                      <img src="http://localhost:5000/uploads/${selectedGuest.photo}" alt="Guest Photo" />
-                    </div>
+          <div class="section">
+            <h3>Identification</h3>
+            <div class="photo-container">
+              ${selectedGuest.photo ? `
+                <div class="photo-item">
+                  <h4>Guest Photo</h4>
+                  <div class="guest-photo">
+                    <img src="http://localhost:5000/uploads/${selectedGuest.photo}" alt="Guest Photo" />
                   </div>
-                ` : ''}
-                ${selectedGuest.qrCode ? `
-                  <div class="photo-item">
-                    <h4>QR Code</h4>
-                    <div class="qr-code">
-                      <img src="${selectedGuest.qrCode}" alt="Guest QR Code" />
-                    </div>
+                </div>
+              ` : ''}
+              ${selectedGuest.qrCode ? `
+                <div class="photo-item">
+                  <h4>QR Code</h4>
+                  <div class="qr-code">
+                    <img src="${selectedGuest.qrCode}" alt="Guest QR Code" />
                   </div>
-                ` : ''}
-              </div>
+                </div>
+              ` : ''}
             </div>
+          </div>
 
-            <div class="section">
-              <h3>Guest Information</h3>
-              <div class="info-grid">
-                <div class="info-item">
-                  <span class="label">Full Name:</span> ${selectedGuest.fullName}
-                </div>
-                <div class="info-item">
-                  <span class="label">Gender:</span> ${selectedGuest.sex}
-                </div>
-                <div class="info-item">
-                  <span class="label">Date of Birth:</span> ${new Date(selectedGuest.dateOfBirth).toLocaleDateString()}
-                </div>
-                <div class="info-item">
-                  <span class="label">Age:</span> ${calculateAge(selectedGuest.dateOfBirth)}
-                </div>
-                <div class="info-item full-width">
-                  <span class="label">Address:</span> ${selectedGuest.address}
-                </div>
-                <div class="info-item">
-                  <span class="label">Contact:</span> ${selectedGuest.contact || 'N/A'}
-                </div>
+          <div class="section">
+            <h3>Guest Information</h3>
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="label">Full Name:</span> ${selectedGuest.fullName}
+              </div>
+              <div class="info-item">
+                <span class="label">Gender:</span> ${selectedGuest.sex}
+              </div>
+              <div class="info-item">
+                <span class="label">Date of Birth:</span> ${new Date(selectedGuest.dateOfBirth).toLocaleDateString()}
+              </div>
+              <div class="info-item">
+                <span class="label">Age:</span> ${calculateAge(selectedGuest.dateOfBirth)}
+              </div>
+              <div class="info-item full-width">
+                <span class="label">Address:</span> ${selectedGuest.address}
+              </div>
+              <div class="info-item">
+                <span class="label">Contact:</span> ${selectedGuest.contact || 'N/A'}
               </div>
             </div>
+          </div>
 
-            <div class="section">
-              <h3>Visit Details</h3>
-              <div class="info-grid">
-                <div class="info-item full-width">
-                  <span class="label">Visit Purpose:</span> ${selectedGuest.visitPurpose}
-                </div>
-                ${selectedGuest.approvedBy ? `
-                <div class="info-item">
-                  <span class="label">Approved By:</span> ${selectedGuest.approvedBy}
-                </div>
-                ` : ''}
-                ${selectedGuest.rejectedBy ? `
-                <div class="info-item">
-                  <span class="label">Rejected By:</span> ${selectedGuest.rejectedBy}
-                </div>
-                ` : ''}
+          <div class="section">
+            <h3>Visit Details</h3>
+            <div class="info-grid">
+              <div class="info-item full-width">
+                <span class="label">Visit Purpose:</span> ${selectedGuest.visitPurpose}
               </div>
+              ${selectedGuest.approvedBy ? `
+              <div class="info-item">
+                <span class="label">Approved By:</span> ${selectedGuest.approvedBy}
+              </div>
+              ` : ''}
+              ${selectedGuest.rejectedBy ? `
+              <div class="info-item">
+                <span class="label">Rejected By:</span> ${selectedGuest.rejectedBy}
+              </div>
+              ` : ''}
             </div>
+          </div>
 
-            ${selectedGuest.violationType ? `
-            <div class="section">
-              <h3>Violation Information</h3>
-              <div class="violation">
-                <div class="info-item">
-                  <span class="label">Violation Type:</span> ${selectedGuest.violationType}
-                </div>
-                <div class="info-item full-width">
-                  <span class="label">Violation Details:</span> ${selectedGuest.violationDetails || 'No violation data'}
-                </div>
+          ${selectedGuest.violationType ? `
+          <div class="section">
+            <h3>Violation Information</h3>
+            <div class="violation">
+              <div class="info-item">
+                <span class="label">Violation Type:</span> ${selectedGuest.violationType}
+              </div>
+              <div class="info-item full-width">
+                <span class="label">Violation Details:</span> ${selectedGuest.violationDetails || 'No violation data'}
               </div>
             </div>
-            ` : ''}
-
-            <div class="section">
-              <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
-                <p><strong>Generated on:</strong> ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
-                <p><em>Official Document - Prison Management System</em></p>
-              </div>
-            </div>
+          </div>
           ` : ''}
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    
-    // Wait for images to load before printing
-    printWindow.onload = function() {
-      setTimeout(() => {
-        printWindow.print();
-      }, 1000);
-    };
+
+          <div class="section">
+            <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
+              <p><strong>Generated on:</strong> ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
+              <p><em>Official Document - Lanao Del Norte District Jail, Region 10</em></p>
+            </div>
+          </div>
+        ` : ''}
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+  
+  printWindow.onload = function() {
+    setTimeout(() => {
+      printWindow.print();
+    }, 1000);
   };
+};
 
   return (
     <Container>

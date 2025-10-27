@@ -505,173 +505,192 @@ const Inmates = ({ gender = 'all' }) => {
   };
 
   const printInmateDetails = () => {
-    const printWindow = window.open('', '_blank');
-    const images = getAvailableImages(selectedInmate);
-    
-    const imageHTML = images.length > 0 ? `
-      <div class="section">
-        <h3>Inmate Photos</h3>
-        <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 15px;">
-          ${images.map(img => `
-            <div style="text-align: center; flex: 1; min-width: 200px;">
-              <div style="font-weight: bold; margin-bottom: 5px;">${img.type}</div>
-              <img 
-                src="http://localhost:5000/uploads/${img.src}" 
-                alt="${img.type}" 
-                style="max-width: 100%; height: 150px; object-fit: cover; border: 1px solid #ddd;"
-                onload="window.print()"
-              />
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    ` : '';
-
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Inmate Details - ${selectedInmate?.inmateCode}</title>
-          <style>
-            body { 
-              font-family: Arial, sans-serif; 
-              margin: 20px; 
-              line-height: 1.4;
-              color: #333;
-            }
-            .header { 
-              text-align: center; 
-              margin-bottom: 30px; 
-              border-bottom: 3px solid #333; 
-              padding-bottom: 15px; 
-            }
-            .section { 
-              margin-bottom: 25px; 
-              padding: 15px;
-              border: 1px solid #ddd;
-              border-radius: 5px;
-            }
-            .section h3 {
-              margin-top: 0;
-              color: #2c3e50;
-              border-bottom: 1px solid #eee;
-              padding-bottom: 8px;
-            }
-            .info-grid {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 15px;
-            }
-            .info-item {
-              margin-bottom: 10px;
-            }
-            .label { 
-              font-weight: bold; 
-              color: #2c3e50;
-              display: inline-block;
-              width: 140px;
-            }
-            .full-width {
-              grid-column: 1 / -1;
-            }
-            @media print {
-              body { margin: 10px; }
-              .section { border: none; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>PRISON MANAGEMENT SYSTEM</h1>
-            <h2>INMATE DETAILS RECORD</h2>
-            <h3>ID: ${selectedInmate?.inmateCode}</h3>
+  const printWindow = window.open('', '_blank');
+  const images = getAvailableImages(selectedInmate);
+  
+  const imageHTML = images.length > 0 ? `
+    <div class="section">
+      <h3>Inmate Photos</h3>
+      <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 15px;">
+        ${images.map(img => `
+          <div style="text-align: center; flex: 1; min-width: 200px;">
+            <div style="font-weight: bold; margin-bottom: 5px;">${img.type}</div>
+            <img 
+              src="http://localhost:5000/uploads/${img.src}" 
+              alt="${img.type}" 
+              style="max-width: 100%; height: 150px; object-fit: cover; border: 1px solid #ddd;"
+              onload="window.print()"
+            />
           </div>
+        `).join('')}
+      </div>
+    </div>
+  ` : '';
+
+  printWindow.document.write(`
+    <html>
+      <head>
+        <title>Inmate Details - ${selectedInmate?.inmateCode}</title>
+        <style>
+          body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
+            line-height: 1.4;
+            color: #333;
+          }
+          .header { 
+            text-align: center; 
+            margin-bottom: 30px; 
+            border-bottom: 3px solid #333; 
+            padding-bottom: 15px; 
+          }
+          .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+          }
+          .header h2 {
+            margin: 5px 0 0 0;
+            font-size: 18px;
+            font-weight: normal;
+            color: #2c3e50;
+          }
+          .header h3 {
+            margin: 10px 0 0 0;
+            font-size: 16px;
+            font-weight: bold;
+            color: #2c3e50;
+          }
+          .section { 
+            margin-bottom: 25px; 
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+          }
+          .section h3 {
+            margin-top: 0;
+            color: #2c3e50;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 8px;
+          }
+          .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+          }
+          .info-item {
+            margin-bottom: 10px;
+          }
+          .label { 
+            font-weight: bold; 
+            color: #2c3e50;
+            display: inline-block;
+            width: 140px;
+          }
+          .full-width {
+            grid-column: 1 / -1;
+          }
+          @media print {
+            body { margin: 10px; }
+            .section { border: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>LANAO DEL NORTE DISTRICT JAIL</h1>
+          <h2>Region 10</h2>
+          <h3>INMATE DETAILS RECORD - ID: ${selectedInmate?.inmateCode}</h3>
+        </div>
+        
+        ${selectedInmate ? `
+          ${imageHTML}
           
-          ${selectedInmate ? `
-            ${imageHTML}
-            
-            <div class="section">
-              <h3>Personal Information</h3>
-              <div class="info-grid">
-                <div class="info-item">
-                  <span class="label">Full Name:</span> ${selectedInmate.fullName}
-                </div>
-                <div class="info-item">
-                  <span class="label">Gender:</span> ${selectedInmate.sex}
-                </div>
-                <div class="info-item">
-                  <span class="label">Date of Birth:</span> ${new Date(selectedInmate.dateOfBirth).toLocaleDateString()}
-                </div>
-                <div class="info-item">
-                  <span class="label">Age:</span> ${calculateAge(selectedInmate.dateOfBirth)}
-                </div>
-                <div class="info-item full-width">
-                  <span class="label">Address:</span> ${selectedInmate.address}
-                </div>
-                <div class="info-item">
-                  <span class="label">Marital Status:</span> ${selectedInmate.maritalStatus || 'N/A'}
-                </div>
-                <div class="info-item">
-                  <span class="label">Eye Color:</span> ${selectedInmate.eyeColor || 'N/A'}
-                </div>
-                <div class="info-item">
-                  <span class="label">Complexion:</span> ${selectedInmate.complexion || 'N/A'}
-                </div>
+          <div class="section">
+            <h3>Personal Information</h3>
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="label">Full Name:</span> ${selectedInmate.fullName}
+              </div>
+              <div class="info-item">
+                <span class="label">Gender:</span> ${selectedInmate.sex}
+              </div>
+              <div class="info-item">
+                <span class="label">Date of Birth:</span> ${new Date(selectedInmate.dateOfBirth).toLocaleDateString()}
+              </div>
+              <div class="info-item">
+                <span class="label">Age:</span> ${calculateAge(selectedInmate.dateOfBirth)}
+              </div>
+              <div class="info-item full-width">
+                <span class="label">Address:</span> ${selectedInmate.address}
+              </div>
+              <div class="info-item">
+                <span class="label">Marital Status:</span> ${selectedInmate.maritalStatus || 'N/A'}
+              </div>
+              <div class="info-item">
+                <span class="label">Eye Color:</span> ${selectedInmate.eyeColor || 'N/A'}
+              </div>
+              <div class="info-item">
+                <span class="label">Complexion:</span> ${selectedInmate.complexion || 'N/A'}
               </div>
             </div>
+          </div>
 
-            <div class="section">
-              <h3>Legal Details</h3>
-              <div class="info-grid">
-                <div class="info-item">
-                  <span class="label">Cell ID:</span> ${selectedInmate.cellId}
-                </div>
-                <div class="info-item">
-                  <span class="label">Crime:</span> ${selectedInmate.crime}
-                </div>
-                <div class="info-item">
-                  <span class="label">Sentence:</span> ${selectedInmate.sentence || 'N/A'}
-                </div>
-                <div class="info-item">
-                  <span class="label">Status:</span> ${selectedInmate.status.toUpperCase()}
-                </div>
-                <div class="info-item">
-                  <span class="label">Date From:</span> ${selectedInmate.dateFrom ? new Date(selectedInmate.dateFrom).toLocaleDateString() : 'N/A'}
-                </div>
-                <div class="info-item">
-                  <span class="label">Date To:</span> ${selectedInmate.dateTo ? new Date(selectedInmate.dateTo).toLocaleDateString() : 'N/A'}
-                </div>
+          <div class="section">
+            <h3>Legal Details</h3>
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="label">Cell ID:</span> ${selectedInmate.cellId}
+              </div>
+              <div class="info-item">
+                <span class="label">Crime:</span> ${selectedInmate.crime}
+              </div>
+              <div class="info-item">
+                <span class="label">Sentence:</span> ${selectedInmate.sentence || 'N/A'}
+              </div>
+              <div class="info-item">
+                <span class="label">Status:</span> ${selectedInmate.status.toUpperCase()}
+              </div>
+              <div class="info-item">
+                <span class="label">Date From:</span> ${selectedInmate.dateFrom ? new Date(selectedInmate.dateFrom).toLocaleDateString() : 'N/A'}
+              </div>
+              <div class="info-item">
+                <span class="label">Date To:</span> ${selectedInmate.dateTo ? new Date(selectedInmate.dateTo).toLocaleDateString() : 'N/A'}
               </div>
             </div>
+          </div>
 
-            <div class="section">
-              <h3>Emergency Contact</h3>
-              <div class="info-grid">
-                <div class="info-item">
-                  <span class="label">Name:</span> ${selectedInmate.emergencyName || 'N/A'}
-                </div>
-                <div class="info-item">
-                  <span class="label">Contact:</span> ${selectedInmate.emergencyContact || 'N/A'}
-                </div>
-                <div class="info-item">
-                  <span class="label">Relationship:</span> ${selectedInmate.emergencyRelation || 'N/A'}
-                </div>
+          <div class="section">
+            <h3>Emergency Contact</h3>
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="label">Name:</span> ${selectedInmate.emergencyName || 'N/A'}
+              </div>
+              <div class="info-item">
+                <span class="label">Contact:</span> ${selectedInmate.emergencyContact || 'N/A'}
+              </div>
+              <div class="info-item">
+                <span class="label">Relationship:</span> ${selectedInmate.emergencyRelation || 'N/A'}
               </div>
             </div>
+          </div>
 
-            <div class="section">
-              <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
-                <p>Generated on: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
-              </div>
+          <div class="section">
+            <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
+              <p><strong>Generated on:</strong> ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
+              <p><em>Official Document - Lanao Del Norte District Jail, Region 10</em></p>
             </div>
-          ` : ''}
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    setTimeout(() => {
-      printWindow.print();
-    }, 1000);
-  };
+          </div>
+        ` : ''}
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+  setTimeout(() => {
+    printWindow.print();
+  }, 1000);
+};
 
   return (
     <Container>

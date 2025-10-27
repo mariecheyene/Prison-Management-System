@@ -2546,6 +2546,701 @@ app.delete("/guests/:id", async (req, res) => {
 });
 
 // ======================
+// IMPORT AND EXPORTS
+// ======================
+
+// IMPROVED GUEST IMPORT ENDPOINT
+app.post("/guests/import", upload.single('csvFile'), async (req, res) => {
+  try {
+    console.log('🔄 Starting guest import process...');
+    
+    if (!req.file) {
+      return res.status(400).json({ message: 'No CSV file uploaded' });
+    }
+
+    console.log('📁 File received:', req.file.originalname);
+
+    const guests = [];
+    const errors = [];
+
+    // Read and parse CSV file
+    const fileContent = fs.readFileSync(req.file.path, 'utf8');
+    console.log('📄 File content length:', fileContent.length);
+
+    const results = Papa.parse(fileContent, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim(),
+      complete: (results) => {
+        console.log('✅ CSV parsing completed, rows:', results.data.length);
+      },
+      error: (error) => {
+        console.error('❌ CSV parsing error:', error);
+      }
+    });
+
+    if (results.errors && results.errors.length > 0) {
+      console.error('CSV parsing errors:', results.errors);
+      return res.status(400).json({ 
+        message: 'Invalid CSV format', 
+        errors: results.errors 
+      });
+    }
+
+    console.log('🔍 Processing CSV rows...');
+    
+    for (const [index, row] of results.data.entries()) {
+      try {
+        console.log(`📝 Processing row ${index + 1}:`, row);
+
+        // Validate required fields
+        const requiredFields = ['lastName', 'firstName', 'sex', 'dateOfBirth', 'address', 'contact', 'visitPurpose'];
+        const missingFields = requiredFields.filter(field => !row[field] || row[field].trim() === '');
+        
+        if (missingFields.length > 0) {
+          errors.push({
+            row: index + 2,
+            error: `Missing required fields: ${missingFields.join(', ')}`,
+            data: row
+          });
+          console.log(`❌ Row ${index + 2} missing fields:`, missingFields);
+          continue;
+        }
+
+        // Validate gender
+        if (!['Male', 'Female'].includes(row.sex)) {
+          errors.push({
+            row: index + 2,
+            error: 'Invalid gender. Must be Male or Female',
+            data: row
+          });
+          console.log(`❌ Row ${index + 2} invalid gender:`, row.sex);
+          continue;
+        }
+
+        // Parse date with multiple format support
+        let dateOfBirth;
+        try {
+          // Try parsing different date formats
+          dateOfBirth = new Date(row.dateOfBirth);
+          if (isNaN(dateOfBirth.getTime())) {
+            // Try MM/DD/YYYY format
+            const parts = row.dateOfBirth.split('/');
+            if (parts.length === 3) {
+              dateOfBirth = new Date(parts[2], parts[0] - 1, parts[1]);
+            }
+            if (isNaN(dateOfBirth.getTime())) {
+              throw new Error('Invalid date format');
+            }
+          }
+        } catch (dateError) {
+          errors.push({
+            row: index + 2,
+            error: `Invalid date format: ${row.dateOfBirth}. Use YYYY-MM-DD or MM/DD/YYYY`,
+            data: row
+          });
+          console.log(`❌ Row ${index + 2} date error:`, row.dateOfBirth);
+          continue;
+        }
+
+        // Calculate age
+        const today = new Date();
+        let age = today.getFullYear() - dateOfBirth.getFullYear();
+        const monthDiff = today.getMonth() - dateOfBirth.getMonth();
+        if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dateOfBirth.getDate())) {
+          age--;
+        }
+
+        const guestData = {
+          lastName: row.lastName.trim(),
+          firstName: row.firstName.trim(),
+          middleName: row.middleName ? row.middleName.trim() : '',
+          extension: row.extension ? row.extension.trim() : '',
+          dateOfBirth: dateOfBirth,
+          age: age.toString(),
+          sex: row.sex,
+          address: row.address.trim(),
+          contact: row.contact.trim(),
+          visitPurpose: row.visitPurpose.trim(),
+          status: 'approved'
+        };
+
+        console.log(`✅ Row ${index + 2} processed successfully:`, guestData.firstName, guestData.lastName);
+        guests.push(guestData);
+      } catch (rowError) {
+        console.error(`❌ Error processing row ${index + 2}:`, rowError);
+        errors.push({
+          row: index + 2,
+          error: rowError.message,
+          data: row
+        });
+      }
+    }
+
+    console.log(`📊 Processing complete: ${guests.length} valid, ${errors.length} errors`);
+
+    // Insert guests into database
+    const importedGuests = [];
+    for (const guestData of guests) {
+      try {
+        // Generate unique guest ID
+        const guestSeq = await autoIncrement('guestId');
+        const guestId = `GST${guestSeq}`;
+
+        // Generate QR code
+        const qrData = {
+          id: guestId,
+          lastName: guestData.lastName,
+          firstName: guestData.firstName,
+          middleName: guestData.middleName,
+          extension: guestData.extension,
+          visitPurpose: guestData.visitPurpose,
+          type: 'guest'
+        };
+        const qrCode = await generateQRCode(qrData);
+
+        const guest = new Guest({
+          ...guestData,
+          id: guestId,
+          qrCode: qrCode,
+          hasTimedIn: false,
+          hasTimedOut: false,
+          timeIn: null,
+          timeOut: null,
+          dateVisited: null,
+          lastVisitDate: null,
+          dailyVisits: [],
+          visitHistory: [],
+          totalVisits: 0
+        });
+
+        const savedGuest = await guest.save();
+        importedGuests.push(savedGuest);
+        console.log(`✅ Saved guest: ${guestId} - ${guestData.firstName} ${guestData.lastName}`);
+      } catch (error) {
+        console.error(`❌ Error saving guest ${guestData.firstName} ${guestData.lastName}:`, error);
+        errors.push({
+          guest: guestData,
+          error: error.message
+        });
+      }
+    }
+
+    // Clean up uploaded file
+    try {
+      if (fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+        console.log('🧹 Cleaned up uploaded file');
+      }
+    } catch (cleanupError) {
+      console.warn('Could not clean up file:', cleanupError);
+    }
+
+    const result = {
+      message: 'Import completed',
+      imported: importedGuests.length,
+      errors: errors,
+      totalProcessed: guests.length
+    };
+
+    console.log('🎉 Import final result:', result);
+    res.json(result);
+
+  } catch (error) {
+    console.error('❌ Import process error:', error);
+    
+    // Clean up file on error
+    if (req.file && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (cleanupError) {
+        console.warn('Could not clean up file on error:', cleanupError);
+      }
+    }
+    
+    res.status(500).json({ 
+      message: 'Failed to import guests', 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+// Import visitors from CSV
+app.post("/visitors/import", upload.single('csvFile'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'No CSV file uploaded' });
+    }
+
+    const visitors = [];
+    const errors = [];
+
+    // Read and parse CSV file using Papa Parse
+    const fileContent = fs.readFileSync(req.file.path, 'utf8');
+    const results = Papa.parse(fileContent, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim()
+    });
+
+    if (results.errors.length > 0) {
+      return res.status(400).json({ 
+        message: 'Invalid CSV format', 
+        errors: results.errors 
+      });
+    }
+
+    for (const [index, row] of results.data.entries()) {
+      try {
+        // Validate required fields for visitors
+        if (!row.lastName || !row.firstName || !row.sex || !row.dateOfBirth || 
+            !row.address || !row.contact || !row.prisonerId || !row.relationship) {
+          errors.push({
+            row: index + 2,
+            error: 'Missing required fields',
+            data: row
+          });
+          continue;
+        }
+
+        // Validate gender
+        if (!['Male', 'Female'].includes(row.sex)) {
+          errors.push({
+            row: index + 2,
+            error: 'Invalid gender. Must be Male or Female',
+            data: row
+          });
+          continue;
+        }
+
+        // Validate date
+        const dateOfBirth = new Date(row.dateOfBirth);
+        if (isNaN(dateOfBirth.getTime())) {
+          errors.push({
+            row: index + 2,
+            error: 'Invalid date format. Use YYYY-MM-DD',
+            data: row
+          });
+          continue;
+        }
+
+        // Verify prisoner exists
+        const inmate = await Inmate.findOne({ inmateCode: row.prisonerId });
+        if (!inmate) {
+          errors.push({
+            row: index + 2,
+            error: `Prisoner with ID ${row.prisonerId} not found`,
+            data: row
+          });
+          continue;
+        }
+
+        // Calculate age
+        const today = new Date();
+        let age = today.getFullYear() - dateOfBirth.getFullYear();
+        const monthDiff = today.getMonth() - dateOfBirth.getMonth();
+        if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dateOfBirth.getDate())) {
+          age--;
+        }
+
+        const visitorData = {
+          lastName: row.lastName.trim(),
+          firstName: row.firstName.trim(),
+          middleName: row.middleName ? row.middleName.trim() : '',
+          extension: row.extension ? row.extension.trim() : '',
+          dateOfBirth: dateOfBirth,
+          age: age.toString(),
+          sex: row.sex,
+          address: row.address.trim(),
+          contact: row.contact.trim(),
+          prisonerId: row.prisonerId.trim(),
+          relationship: row.relationship.trim(),
+          status: 'approved'
+        };
+
+        visitors.push(visitorData);
+      } catch (rowError) {
+        errors.push({
+          row: index + 2,
+          error: rowError.message,
+          data: row
+        });
+      }
+    }
+
+    // Insert visitors into database
+    const importedVisitors = [];
+    for (const visitorData of visitors) {
+      try {
+        // Generate unique visitor ID
+        const visitorSeq = await autoIncrement('visitorId');
+        const visitorId = `VIS${visitorSeq}`;
+
+        // Generate QR code
+        const qrData = {
+          id: visitorId,
+          lastName: visitorData.lastName,
+          firstName: visitorData.firstName,
+          middleName: visitorData.middleName,
+          extension: visitorData.extension,
+          prisonerId: visitorData.prisonerId,
+          type: 'visitor'
+        };
+        const qrCode = await generateQRCode(qrData);
+
+        const visitor = new Visitor({
+          ...visitorData,
+          id: visitorId,
+          qrCode: qrCode,
+          hasTimedIn: false,
+          hasTimedOut: false,
+          timeIn: null,
+          timeOut: null,
+          dateVisited: null,
+          lastVisitDate: null,
+          isTimerActive: false,
+          visitApproved: false,
+          dailyVisits: [],
+          visitHistory: [],
+          totalVisits: 0
+        });
+
+        const savedVisitor = await visitor.save();
+        importedVisitors.push(savedVisitor);
+      } catch (error) {
+        errors.push({
+          visitor: visitorData,
+          error: error.message
+        });
+      }
+    }
+
+    // Clean up uploaded file
+    fs.unlinkSync(req.file.path);
+
+    res.json({
+      message: 'Import completed',
+      imported: importedVisitors.length,
+      errors: errors,
+      totalProcessed: visitors.length
+    });
+
+  } catch (error) {
+    console.error('Import error:', error);
+    
+    // Clean up file on error
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    res.status(500).json({ 
+      message: 'Failed to import visitors', 
+      error: error.message 
+    });
+  }
+});
+
+// ======================
+// INMATES IMPORT ENDPOINTS - ADDED MISSING CODE
+// ======================
+
+// Import inmates from CSV
+app.post("/inmates/import", upload.single('csvFile'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'No CSV file uploaded' });
+    }
+
+    const inmates = [];
+    const errors = [];
+
+    // Read and parse CSV file using Papa Parse
+    const fileContent = fs.readFileSync(req.file.path, 'utf8');
+    const results = Papa.parse(fileContent, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim()
+    });
+
+    if (results.errors.length > 0) {
+      return res.status(400).json({ 
+        message: 'Invalid CSV format', 
+        errors: results.errors 
+      });
+    }
+
+    for (const [index, row] of results.data.entries()) {
+      try {
+        // Validate required fields
+        if (!row.lastName || !row.firstName || !row.sex || !row.dateOfBirth || 
+            !row.address || !row.cellId || !row.crime) {
+          errors.push({
+            row: index + 2,
+            error: 'Missing required fields',
+            data: row
+          });
+          continue;
+        }
+
+        // Validate gender
+        if (!['Male', 'Female'].includes(row.sex)) {
+          errors.push({
+            row: index + 2,
+            error: 'Invalid gender. Must be Male or Female',
+            data: row
+          });
+          continue;
+        }
+
+        // Validate date
+        const dateOfBirth = new Date(row.dateOfBirth);
+        if (isNaN(dateOfBirth.getTime())) {
+          errors.push({
+            row: index + 2,
+            error: 'Invalid date format. Use YYYY-MM-DD',
+            data: row
+          });
+          continue;
+        }
+
+        // Validate other dates if provided
+        let dateFrom = null;
+        let dateTo = null;
+        
+        if (row.dateFrom && row.dateFrom.trim() !== '') {
+          dateFrom = new Date(row.dateFrom);
+          if (isNaN(dateFrom.getTime())) {
+            errors.push({
+              row: index + 2,
+              error: 'Invalid dateFrom format. Use YYYY-MM-DD',
+              data: row
+            });
+            continue;
+          }
+        }
+
+        if (row.dateTo && row.dateTo.trim() !== '') {
+          dateTo = new Date(row.dateTo);
+          if (isNaN(dateTo.getTime())) {
+            errors.push({
+              row: index + 2,
+              error: 'Invalid dateTo format. Use YYYY-MM-DD',
+              data: row
+            });
+            continue;
+          }
+        }
+
+        const inmateData = {
+          lastName: row.lastName.trim(),
+          firstName: row.firstName.trim(),
+          middleName: row.middleName ? row.middleName.trim() : '',
+          extension: row.extension ? row.extension.trim() : '',
+          sex: row.sex,
+          dateOfBirth: dateOfBirth,
+          address: row.address.trim(),
+          maritalStatus: row.maritalStatus ? row.maritalStatus.trim() : '',
+          eyeColor: row.eyeColor ? row.eyeColor.trim() : '',
+          complexion: row.complexion ? row.complexion.trim() : '',
+          cellId: row.cellId.trim(),
+          sentence: row.sentence ? row.sentence.trim() : '',
+          dateFrom: dateFrom,
+          dateTo: dateTo,
+          crime: row.crime.trim(),
+          emergencyName: row.emergencyName ? row.emergencyName.trim() : '',
+          emergencyContact: row.emergencyContact ? row.emergencyContact.trim() : '',
+          emergencyRelation: row.emergencyRelation ? row.emergencyRelation.trim() : '',
+          status: row.status && ['active', 'inactive', 'released', 'transferred'].includes(row.status) 
+            ? row.status 
+            : 'active'
+        };
+
+        inmates.push(inmateData);
+      } catch (rowError) {
+        errors.push({
+          row: index + 2,
+          error: rowError.message,
+          data: row
+        });
+      }
+    }
+
+    // Insert inmates into database
+    const importedInmates = [];
+    for (const inmateData of inmates) {
+      try {
+        // Generate unique inmate code
+        const inmateSeq = await autoIncrement('inmateCode');
+        const inmateCode = `INM${inmateSeq}`;
+
+        const inmate = new Inmate({
+          ...inmateData,
+          inmateCode: inmateCode
+        });
+
+        const savedInmate = await inmate.save();
+        importedInmates.push(savedInmate);
+      } catch (error) {
+        errors.push({
+          inmate: inmateData,
+          error: error.message
+        });
+      }
+    }
+
+    // Clean up uploaded file
+    fs.unlinkSync(req.file.path);
+
+    res.json({
+      message: 'Import completed',
+      imported: importedInmates.length,
+      errors: errors,
+      totalProcessed: inmates.length
+    });
+
+  } catch (error) {
+    console.error('Import error:', error);
+    
+    // Clean up file on error
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    res.status(500).json({ 
+      message: 'Failed to import inmates', 
+      error: error.message 
+    });
+  }
+});
+
+// CSV Upload for Inmates (legacy endpoint - matches your frontend call)
+app.post("/inmates/upload-csv", upload.single('csvFile'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'No CSV file uploaded' });
+    }
+
+    const inmates = [];
+    const errors = [];
+
+    // Read and parse CSV file
+    const fileContent = fs.readFileSync(req.file.path, 'utf8');
+    const results = Papa.parse(fileContent, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim()
+    });
+
+    if (results.errors.length > 0) {
+      return res.status(400).json({ 
+        message: 'Invalid CSV format', 
+        errors: results.errors 
+      });
+    }
+
+    for (const [index, row] of results.data.entries()) {
+      try {
+        // Validate required fields
+        if (!row.lastName || !row.firstName || !row.sex || !row.dateOfBirth || 
+            !row.address || !row.cellId || !row.crime) {
+          errors.push({
+            row: index + 2,
+            error: 'Missing required fields',
+            data: row
+          });
+          continue;
+        }
+
+        // Process inmate data (same logic as above)
+        const dateOfBirth = new Date(row.dateOfBirth);
+        if (isNaN(dateOfBirth.getTime())) {
+          errors.push({
+            row: index + 2,
+            error: 'Invalid date format',
+            data: row
+          });
+          continue;
+        }
+
+        const inmateData = {
+          lastName: row.lastName.trim(),
+          firstName: row.firstName.trim(),
+          middleName: row.middleName ? row.middleName.trim() : '',
+          extension: row.extension ? row.extension.trim() : '',
+          sex: row.sex,
+          dateOfBirth: dateOfBirth,
+          address: row.address.trim(),
+          maritalStatus: row.maritalStatus || '',
+          eyeColor: row.eyeColor || '',
+          complexion: row.complexion || '',
+          cellId: row.cellId.trim(),
+          sentence: row.sentence || '',
+          dateFrom: row.dateFrom ? new Date(row.dateFrom) : null,
+          dateTo: row.dateTo ? new Date(row.dateTo) : null,
+          crime: row.crime.trim(),
+          emergencyName: row.emergencyName || '',
+          emergencyContact: row.emergencyContact || '',
+          emergencyRelation: row.emergencyRelation || '',
+          status: row.status || 'active'
+        };
+
+        inmates.push(inmateData);
+      } catch (rowError) {
+        errors.push({
+          row: index + 2,
+          error: rowError.message,
+          data: row
+        });
+      }
+    }
+
+    // Insert into database
+    const importedInmates = [];
+    for (const inmateData of inmates) {
+      try {
+        const inmateSeq = await autoIncrement('inmateCode');
+        const inmateCode = `INM${inmateSeq}`;
+
+        const inmate = new Inmate({
+          ...inmateData,
+          inmateCode: inmateCode
+        });
+
+        const savedInmate = await inmate.save();
+        importedInmates.push(savedInmate);
+      } catch (error) {
+        errors.push({
+          inmate: inmateData,
+          error: error.message
+        });
+      }
+    }
+
+    // Clean up
+    fs.unlinkSync(req.file.path);
+
+    res.json({
+      message: `Successfully imported ${importedInmates.length} inmates`,
+      imported: importedInmates.length,
+      errors: errors
+    });
+
+  } catch (error) {
+    console.error('CSV upload error:', error);
+    
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    res.status(500).json({ 
+      message: 'Failed to upload CSV', 
+      error: error.message 
+    });
+  }
+});
+
+// ======================
 // PENDING VISITOR ENDPOINTS
 // ======================
 
@@ -2800,39 +3495,38 @@ app.get("/pending-visitors/stats", async (req, res) => {
 app.post("/pending-guests", 
   upload.single('photo'),
   async (req, res) => {
-    try {
-      const seq = await autoIncrement('pendingGuestId');
-      const id = `PENG${seq}`;
+  try {
+    const seq = await autoIncrement('pendingGuestId');
+    const id = `PENG${seq}`;
 
-      const pendingGuestData = {
-        ...req.body,
-        id,
-        dateOfBirth: req.body.dateOfBirth ? new Date(req.body.dateOfBirth) : null,
-        status: 'pending'
-      };
+    const pendingGuestData = {
+      ...req.body,
+      id,
+      dateOfBirth: req.body.dateOfBirth ? new Date(req.body.dateOfBirth) : null,
+      status: 'pending'
+    };
 
-      if (req.file) {
-        pendingGuestData.photo = req.file.filename;
-      }
-
-      const pendingGuest = new PendingGuest(pendingGuestData);
-      await pendingGuest.save();
-
-      const pendingGuestWithFullName = {
-        ...pendingGuest.toObject(),
-        fullName: pendingGuest.fullName
-      };
-
-      res.status(201).json({ 
-        message: "Guest request submitted for approval", 
-        pendingGuest: pendingGuestWithFullName 
-      });
-    } catch (error) {
-      console.error("Pending guest creation error:", error);
-      res.status(500).json({ message: "Failed to create pending guest", error: error.message });
+    if (req.file) {
+      pendingGuestData.photo = req.file.filename;
     }
+
+    const pendingGuest = new PendingGuest(pendingGuestData);
+    await pendingGuest.save();
+
+    const pendingGuestWithFullName = {
+      ...pendingGuest.toObject(),
+      fullName: pendingGuest.fullName
+    };
+
+    res.status(201).json({ 
+      message: "Guest request submitted for approval", 
+      pendingGuest: pendingGuestWithFullName 
+    });
+  } catch (error) {
+    console.error("Pending guest creation error:", error);
+    res.status(500).json({ message: "Failed to create pending guest", error: error.message });
   }
-);
+});
 
 // GET PENDING GUESTS (with optional status filter)
 app.get("/pending-guests", async (req, res) => {
@@ -3526,9 +4220,9 @@ app.post("/backups/quick", async (req, res) => {
     // Fetch only essential data for quick backup
     const [users, inmates, visitors, guests] = await Promise.all([
       User.find().select('-password').lean(),
-      Inmate.find().select('inmateCode lastName firstName status').lean(),
-      Visitor.find().select('id lastName firstName status totalVisits lastVisitDate').lean(),
-      Guest.find().select('id lastName firstName status totalVisits lastVisitDate').lean()
+      Inmate.find().select('inmateCode lastName firstName status cellId crime').lean(),
+      Visitor.find().select('id lastName firstName status prisonerId totalVisits lastVisitDate').lean(),
+      Guest.find().select('id lastName firstName status visitPurpose totalVisits lastVisitDate').lean()
     ]);
 
     const quickBackupData = {
@@ -4218,40 +4912,40 @@ const generatePerformanceAnalytics = async (start, end) => {
   });
 
   // Calculate average duration and visits per day
-  const dailyPerformance = {};
-  visitLogs.forEach(log => {
-    const dateStr = log.visitDate.toISOString().split('T')[0];
-    if (!dailyPerformance[dateStr]) {
-      dailyPerformance[dateStr] = { visits: 0, totalDuration: 0 };
-    }
-    dailyPerformance[dateStr].visits++;
-    
-    // Simple duration calculation (you can enhance this)
-    if (log.timeIn && log.timeOut) {
-      // Mock duration calculation - in real scenario, calculate actual duration
-      dailyPerformance[dateStr].totalDuration += 60; // 60 minutes average
-    }
-  });
+    const dailyPerformance = {};
+    visitLogs.forEach(log => {
+      const dateStr = log.visitDate.toISOString().split('T')[0];
+      if (!dailyPerformance[dateStr]) {
+        dailyPerformance[dateStr] = { visits: 0, totalDuration: 0 };
+      }
+      dailyPerformance[dateStr].visits++;
+      
+      // Simple duration calculation (you can enhance this)
+      if (log.timeIn && log.timeOut) {
+        // Mock duration calculation - in real scenario, calculate actual duration
+        dailyPerformance[dateStr].totalDuration += 60; // 60 minutes average
+      }
+    });
 
-  const chartData = Object.entries(dailyPerformance).map(([date, data]) => ({
-    name: new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    visits: data.visits,
-    avgDuration: Math.round(data.totalDuration / data.visits),
-    date: date
-  }));
+    const chartData = Object.entries(dailyPerformance).map(([date, data]) => ({
+      name: new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      visits: data.visits,
+      avgDuration: Math.round(data.totalDuration / data.visits),
+      date: date
+    }));
 
-  const totalVisits = visitLogs.length;
-  const avgDuration = totalVisits > 0 ? 
-    Math.round(Object.values(dailyPerformance).reduce((sum, day) => sum + day.totalDuration, 0) / totalVisits) : 0;
+    const totalVisits = visitLogs.length;
+    const avgDuration = totalVisits > 0 ? 
+      Math.round(Object.values(dailyPerformance).reduce((sum, day) => sum + day.totalDuration, 0) / totalVisits) : 0;
 
-  const summaryData = {
-    totalCompletedVisits: totalVisits,
-    averageDuration: avgDuration + ' mins',
-    busiestDay: Math.max(...Object.values(dailyPerformance).map(d => d.visits)),
-    efficiencyScore: Math.round((totalVisits / Math.max(1, Object.keys(dailyPerformance).length)) * 10) / 10
-  };
+    const summaryData = {
+      totalCompletedVisits: totalVisits,
+      averageDuration: avgDuration + ' mins',
+      busiestDay: Math.max(...Object.values(dailyPerformance).map(d => d.visits)),
+      efficiencyScore: Math.round((totalVisits / Math.max(1, Object.keys(dailyPerformance).length)) * 10) / 10
+    };
 
-  return { chartData, summaryData };
+    return { chartData, summaryData };
 };
 
 // Helper function to get week start date (Monday)

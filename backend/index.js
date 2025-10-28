@@ -254,6 +254,11 @@ const visitorSchema = new mongoose.Schema({
   hasTimedOut: { type: Boolean, default: false },
   lastVisitDate: { type: Date, default: null },
   
+  // NEW: Daily activity tracker
+  lastActiveDate: { type: Date, default: null },
+
+
+  
   // Timer fields
   timerStart: { type: Date, default: null },
   timerEnd: { type: Date, default: null },
@@ -385,6 +390,9 @@ const guestSchema = new mongoose.Schema({
   hasTimedIn: { type: Boolean, default: false },
   hasTimedOut: { type: Boolean, default: false },
   lastVisitDate: Date,
+  
+  // NEW: Daily activity tracker
+  lastActiveDate: { type: Date, default: null },
   
   // Daily visit tracking
   dailyVisits: [{
@@ -602,12 +610,12 @@ app.get("/:personType/:id/visit-stats", async (req, res) => {
 // SCAN PROCESSING ENDPOINTS - ENHANCED WITH VISIT HISTORY
 // ======================
 
-// SCAN PROCESSING - ENHANCED WITH VISIT HISTORY
+// SCAN PROCESSING - FIXED VERSION
 app.post("/scan-process", async (req, res) => {
   try {
     const { qrData, personId, isGuest } = req.body;
     
-    console.log('🔍 SCAN PROCESS:', { personId, isGuest });
+    console.log('🔍 SCAN PROCESS STARTED:', { personId, isGuest });
 
     if (!personId) {
       return res.status(400).json({ message: "Person ID is required" });
@@ -628,141 +636,74 @@ app.post("/scan-process", async (req, res) => {
     const todayDateString = today.toISOString().split('T')[0];
     const now = new Date();
 
-    console.log('📅 Today:', todayDateString);
-    console.log('⏰ Current time:', now.toISOString());
-    console.log('👤 Person status:', {
+    console.log('=== DEBUG INFORMATION ===');
+    console.log('📅 SERVER TIME:', {
+      currentTime: now.toString(),
+      todayDateString: todayDateString,
+      todayISO: today.toISOString(),
+      serverTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+    });
+    
+    console.log('👤 PERSON DATA (BEFORE ANY CHANGES):', {
+      id: person.id,
+      name: person.fullName,
       hasTimedIn: person.hasTimedIn,
       hasTimedOut: person.hasTimedOut,
+      timeIn: person.timeIn,
+      timeOut: person.timeOut,
       dateVisited: person.dateVisited,
       lastVisitDate: person.lastVisitDate,
-      totalVisits: person.totalVisits || 0
+      lastActiveDate: person.lastActiveDate
     });
 
-    // ENHANCED: Check multiple date fields and daily visits
-    let canTimeIn = true;
-    let message = "";
+    // Convert dates to strings for comparison (USE ORIGINAL VALUES)
+    const lastActiveDate = person.lastActiveDate ? new Date(person.lastActiveDate) : null;
+    const lastActiveDateString = lastActiveDate ? lastActiveDate.toISOString().split('T')[0] : 'NO LAST ACTIVE DATE';
+    
+    const lastVisitDate = person.lastVisitDate ? new Date(person.lastVisitDate) : null;
+    const lastVisitDateString = lastVisitDate ? lastVisitDate.toISOString().split('T')[0] : 'NO LAST VISIT DATE';
+    
+    const dateVisited = person.dateVisited ? new Date(person.dateVisited) : null;
+    const dateVisitedString = dateVisited ? dateVisited.toISOString().split('T')[0] : 'NO DATE VISITED';
+
+    console.log('📊 DATE COMPARISONS (ORIGINAL DATA):', {
+      today: todayDateString,
+      lastActiveDate: lastActiveDateString,
+      lastVisitDate: lastVisitDateString,
+      dateVisited: dateVisitedString,
+      isSameDayAsLastActive: lastActiveDateString === todayDateString,
+      isSameDayAsLastVisit: lastVisitDateString === todayDateString,
+      isSameDayAsDateVisited: dateVisitedString === todayDateString
+    });
+
+    // STEP 1: Check if we need to reset for new day (USE ORIGINAL lastActiveDate)
     let shouldAutoReset = false;
-
-    // Check 1: Main dateVisited field
-    if (person.dateVisited) {
-      const lastVisitDate = new Date(person.dateVisited);
-      if (!isNaN(lastVisitDate.getTime())) {
-        const lastVisitDateString = lastVisitDate.toISOString().split('T')[0];
-        console.log('📊 Last visit date from dateVisited:', lastVisitDateString);
-        
-        if (lastVisitDateString === todayDateString) {
-          // Visited today - check status
-          if (person.hasTimedOut) {
-            canTimeIn = false;
-            message = "✅ Visit already completed today";
-          } else {
-            canTimeIn = false;
-            message = "🕒 Active visit found - ready for time out";
-          }
-        } else {
-          // Different day - allow reset
-          console.log('🔄 DIFFERENT DAY DETECTED - Auto-reset allowed');
-          shouldAutoReset = true;
-          canTimeIn = true;
-          message = "🕒 New day - time in allowed";
-        }
-      }
+    
+    if (lastActiveDateString !== 'NO LAST ACTIVE DATE' && lastActiveDateString !== todayDateString) {
+      console.log('🔄 NEW DAY DETECTED via lastActiveDate');
+      shouldAutoReset = true;
+    } else if (lastActiveDateString === 'NO LAST ACTIVE DATE') {
+      console.log('ℹ️ No lastActiveDate found - first time scan?');
+      shouldAutoReset = true; // Reset if no lastActiveDate exists
+    } else {
+      console.log('ℹ️ Same day as lastActiveDate - no reset needed');
     }
 
-    // Check 2: LastVisitDate field as fallback
-    if (!shouldAutoReset && person.lastVisitDate) {
-      const lastVisitDate = new Date(person.lastVisitDate);
-      if (!isNaN(lastVisitDate.getTime())) {
-        const lastVisitDateString = lastVisitDate.toISOString().split('T')[0];
-        console.log('📊 Last visit date from lastVisitDate:', lastVisitDateString);
-        
-        if (lastVisitDateString === todayDateString) {
-          if (person.hasTimedOut) {
-            canTimeIn = false;
-            message = "✅ Visit already completed today (from lastVisitDate)";
-          } else {
-            canTimeIn = false;
-            message = "🕒 Active visit found - ready for time out (from lastVisitDate)";
-          }
-        } else {
-          console.log('🔄 DIFFERENT DAY DETECTED in lastVisitDate - Auto-reset allowed');
-          shouldAutoReset = true;
-          canTimeIn = true;
-          message = "🕒 New day - time in allowed";
-        }
-      }
-    }
+    console.log('🔄 AUTO-RESET DECISION:', { shouldAutoReset });
 
-    // Check 3: Daily visits array as additional check
-    if (person.dailyVisits && person.dailyVisits.length > 0) {
-      const todayVisits = person.dailyVisits.filter(visit => {
-        if (!visit.visitDate) return false;
-        try {
-          const visitDate = new Date(visit.visitDate);
-          if (isNaN(visitDate.getTime())) return false;
-          const visitDateString = visitDate.toISOString().split('T')[0];
-          return visitDateString === todayDateString;
-        } catch (e) {
-          return false;
-        }
-      });
-
-      console.log('📊 Today visits from dailyVisits:', todayVisits.length);
-
-      if (todayVisits.length > 0) {
-        const hasActiveVisit = todayVisits.some(visit => visit.hasTimedIn && !visit.hasTimedOut);
-        const hasCompletedVisit = todayVisits.some(visit => visit.hasTimedIn && visit.hasTimedOut);
-
-        if (hasCompletedVisit) {
-          canTimeIn = false;
-          message = "✅ Visit already completed today (from dailyVisits)";
-        } else if (hasActiveVisit) {
-          canTimeIn = false;
-          message = "🕒 Active visit found - ready for time out (from dailyVisits)";
-        }
-      } else {
-        console.log('🔄 No visits found for today in dailyVisits - New day allowed');
-        shouldAutoReset = true;
-        canTimeIn = true;
-        message = "🕒 New day - time in allowed";
-      }
-    }
-
-    // AUTO-RESET LOGIC: If it's a new day, reset their DAILY status but preserve visit history
+    // STEP 2: AUTO-RESET for new day
     if (shouldAutoReset) {
-      console.log('🔄 PERFORMING AUTO-RESET for new day - PRESERVING VISIT HISTORY');
-      
-      // Get the last visit date BEFORE resetting from visit history
-      let lastVisitDate = person.dateVisited || person.lastVisitDate;
-      
-      // If no last visit date, check visit history
-      if (!lastVisitDate && person.visitHistory && person.visitHistory.length > 0) {
-        const sortedHistory = person.visitHistory.sort((a, b) => new Date(b.visitDate) - new Date(a.visitDate));
-        lastVisitDate = sortedHistory[0].visitDate;
-      }
+      console.log('🔄 PERFORMING AUTO-RESET FOR NEW DAY');
       
       const resetData = {
         hasTimedIn: false,
         hasTimedOut: false,
         timeIn: null,
         timeOut: null,
-        // PRESERVE historical data
-        dateVisited: lastVisitDate,
-        lastVisitDate: lastVisitDate,
-        dailyVisits: person.dailyVisits ? person.dailyVisits.filter(visit => {
-          if (!visit.visitDate) return false;
-          try {
-            const visitDate = new Date(visit.visitDate);
-            if (isNaN(visitDate.getTime())) return false;
-            const visitDateString = visitDate.toISOString().split('T')[0];
-            return visitDateString === todayDateString;
-          } catch (e) {
-            return false;
-          }
-        }) : []
+        dateVisited: null,
+        dailyVisits: []
       };
 
-      // Add type-specific fields
       if (isGuest) {
         resetData.status = 'approved';
       } else {
@@ -771,6 +712,8 @@ app.post("/scan-process", async (req, res) => {
         resetData.timerEnd = null;
         resetData.visitApproved = false;
       }
+
+      console.log('📝 RESET DATA:', resetData);
 
       if (isGuest) {
         await Guest.findOneAndUpdate(
@@ -791,49 +734,67 @@ app.post("/scan-process", async (req, res) => {
         person = await Visitor.findOne({ id: personId });
       }
 
-      console.log('✅ AUTO-RESET COMPLETED - Visit history preserved');
-      console.log('📊 Last visit date preserved:', lastVisitDate);
+      console.log('✅ AFTER RESET - PERSON DATA:', {
+        hasTimedIn: person.hasTimedIn,
+        hasTimedOut: person.hasTimedOut,
+        timeIn: person.timeIn,
+        timeOut: person.timeOut
+      });
     }
 
-    console.log('📊 FINAL SCAN CHECK:', { 
+    // STEP 3: Check current status (AFTER potential reset)
+    let canTimeIn = true;
+    let message = "";
+
+    if (person.hasTimedOut) {
+      canTimeIn = false;
+      message = "✅ Visit already completed today";
+    } else if (person.hasTimedIn && !person.hasTimedOut) {
+      canTimeIn = false;
+      message = "🕒 Active visit found - ready for time out";
+    } else {
+      canTimeIn = true;
+      message = shouldAutoReset ? "🕒 New day - time in allowed" : "🕒 Ready for time in";
+    }
+
+    console.log('🎯 FINAL DECISION:', {
       canTimeIn: canTimeIn,
       message: message,
-      shouldAutoReset: shouldAutoReset
+      hasTimedIn: person.hasTimedIn,
+      hasTimedOut: person.hasTimedOut
     });
 
     let scanType, canProceed, requiresApproval;
 
     if (canTimeIn && !person.hasTimedIn) {
       scanType = 'time_in_pending';
-      message = message || `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME IN REQUEST`;
       canProceed = true;
       requiresApproval = true;
     } else if (person.hasTimedIn && !person.hasTimedOut) {
       scanType = 'time_out_pending';
-      message = message || `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME OUT REQUEST`;
       canProceed = true;
       requiresApproval = true;
     } else {
       scanType = 'completed';
-      message = message || `✅ Visit already completed today`;
       canProceed = false;
       requiresApproval = false;
     }
 
+
     const scanResult = {
-      person: person,
+      person: {
+        ...person.toObject(),
+        fullName: person.fullName
+      },
       scanType: scanType,
       message: message,
       canProceed: canProceed,
       requiresApproval: requiresApproval,
-      visitHistory: {
-        totalVisits: person.totalVisits || 0,
-        lastVisitDate: person.lastVisitDate,
-        averageDuration: person.averageVisitDuration
-      }
+      resetPerformed: shouldAutoReset
     };
 
-    console.log('🎯 FINAL SCAN RESULT:', scanType);
+    console.log('🎉 FINAL SCAN RESULT:', scanType);
+    console.log('=== DEBUG END ===\n');
     res.json(scanResult);
 
   } catch (error) {
@@ -841,8 +802,8 @@ app.post("/scan-process", async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
-
-// APPROVE VISITOR TIME IN - ENHANCED WITH VISIT HISTORY
+    
+// APPROVE VISITOR TIME IN - FIXED
 app.put("/visitors/:id/approve-time-in", async (req, res) => {
   try {
     const visitor = await Visitor.findOne({ id: req.params.id });
@@ -910,7 +871,7 @@ app.put("/visitors/:id/approve-time-in", async (req, res) => {
       visitLogId: visitLog._id
     };
 
-    // Update visitor with visit history tracking
+    // Update visitor - REMOVED lastVisitDate from time-in!
     const updatedVisitor = await Visitor.findOneAndUpdate(
       { id: req.params.id },
       {
@@ -922,8 +883,9 @@ app.put("/visitors/:id/approve-time-in", async (req, res) => {
           isTimerActive: true,
           timerStart: timerStart,
           timerEnd: timerEnd,
-          lastVisitDate: today,
-          dateVisited: today
+          dateVisited: today,        // Keep current visit date
+          lastActiveDate: today      // Keep for daily tracking
+          // REMOVED: lastVisitDate: today ← Don't set here!
         },
         $push: { dailyVisits: newVisit }
       },
@@ -1011,20 +973,21 @@ app.put("/visitors/:id/approve-time-out", async (req, res) => {
 
     // UPDATE VISITOR - Add to history and update statistics
     const updatedVisitor = await Visitor.findOneAndUpdate(
-      { id: req.params.id },
-      {
-        $set: {
-          hasTimedOut: true,
-          timeOut: currentTime,
-          isTimerActive: false,
-          lastVisitDate: today,
-          lastVisitDuration: visitDuration
-        },
-        $push: { visitHistory: visitHistoryEntry },
-        $inc: { totalVisits: 1 }
-      },
-      { new: true }
-    );
+  { id: req.params.id },
+  {
+    $set: {
+      hasTimedOut: true,
+      timeOut: currentTime,
+      isTimerActive: false,
+      lastVisitDate: today,
+      lastVisitDuration: visitDuration,
+      lastActiveDate: today // ✅ ADD THIS LINE
+    },
+    $push: { visitHistory: visitHistoryEntry },
+    $inc: { totalVisits: 1 }
+  },
+  { new: true }
+);
 
     // Calculate average duration
     if (updatedVisitor.visitHistory && updatedVisitor.visitHistory.length > 0) {
@@ -1069,7 +1032,7 @@ app.put("/visitors/:id/approve-time-out", async (req, res) => {
   }
 });
 
-// APPROVE GUEST TIME IN - ENHANCED WITH VISIT HISTORY
+// APPROVE GUEST TIME IN - FIXED
 app.put("/guests/:id/approve-time-in", async (req, res) => {
   try {
     console.log('🔄 GUEST TIME-IN STARTED:', req.params.id);
@@ -1146,9 +1109,10 @@ app.put("/guests/:id/approve-time-in", async (req, res) => {
           hasTimedOut: false,
           timeIn: currentTime,
           timeOut: null,
-          lastVisitDate: today,
-          dateVisited: today,
+          dateVisited: today,        // Keep current visit date
+          lastActiveDate: today,     // Keep for daily tracking
           status: 'approved'
+          // REMOVED: lastVisitDate: today ← Don't set here!
         },
         $push: { 
           dailyVisits: newVisit 
@@ -1239,20 +1203,21 @@ app.put("/guests/:id/approve-time-out", async (req, res) => {
 
     // UPDATE GUEST - Add to history and update statistics
     const updatedGuest = await Guest.findOneAndUpdate(
-      { id: req.params.id },
-      {
-        $set: {
-          hasTimedOut: true,
-          timeOut: currentTime,
-          status: 'completed',
-          lastVisitDate: today,
-          lastVisitDuration: visitDuration
-        },
-        $push: { visitHistory: visitHistoryEntry },
-        $inc: { totalVisits: 1 }
-      },
-      { new: true }
-    );
+  { id: req.params.id },
+  {
+    $set: {
+      hasTimedOut: true,
+      timeOut: currentTime,
+      status: 'completed',
+      lastVisitDate: today,
+      lastVisitDuration: visitDuration,
+      lastActiveDate: today // ✅ ADD THIS LINE
+    },
+    $push: { visitHistory: visitHistoryEntry },
+    $inc: { totalVisits: 1 }
+  },
+  { new: true }
+);
 
     // Calculate average duration
     if (updatedGuest.visitHistory && updatedGuest.visitHistory.length > 0) {

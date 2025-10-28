@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { NavLink, Routes, Route, useLocation, Navigate } from "react-router-dom";
-import "./css/Admin.css";
+import "./css/Style.css";
 import "boxicons/css/boxicons.min.css";
 import "bootstrap/dist/css/bootstrap.min.css";
 import DashboardHome from "./Components/Dashboard";
@@ -19,6 +19,7 @@ import { Badge, Dropdown, Button } from "react-bootstrap";
 import axios from "axios";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+import { BsQrCodeScan } from 'react-icons/bs';
 
 const Admin = () => {
   const [isSidebarClosed, setIsSidebarClosed] = useState(false);
@@ -70,18 +71,20 @@ const Admin = () => {
     });
   };
 
-  return (
+return (
     <div className="dashboard">
       <div className={`sidebar ${isSidebarClosed ? "close" : ""}`}>
-            <NavLink to="/admin/dashboard" className="logo">
-        <div className="logo-img">
-          <img src="/img/logo.jpg" alt="LANAO DEL NORTE DISTRICT JAIL REGION 10 Logo" />
-        </div>
-        <div className="logo-name">
-          <span>LANAO DEL NORTE</span>
-          <span>DISTRICT JAIL REGION 10</span>
-        </div>
-      </NavLink>
+        <NavLink to="/admin/dashboard" className="logo">
+          <div className="logo-content">
+            <div className="logo-img">
+              <img src="/img/logo.jpg" alt="LANAO DEL NORTE DISTRICT JAIL REGION 10 Logo" />
+            </div>
+            <div className="logo-text">
+              <div className="logo-main">LANAO DEL NORTE DISTRICT JAIL</div>
+              <div className="logo-subtitle">REGION 10</div>
+            </div>
+          </div>
+        </NavLink>
           <ul className="side-menu">
             {[
               { name: "Dashboard", icon: "bx bxs-dashboard", path: "/admin/dashboard" },
@@ -138,8 +141,11 @@ const Admin = () => {
             className="me-3"
             size="sm"
           >
-            <i className="bx bxs-qr-scan me-1"></i>
-            Scan QR
+            <svg className="me-1" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M3 11h8V3H3v8zm2-6h4v4H5V5zM3 21h8v-8H3v8zm2-6h4v4H5v-4zm8-12v8h8V3h-8zm6 6h-4V5h4v4z"/>
+    <path d="M19 19h2v2h-2zM15 15h2v2h-2zM15 19h2v2h-2zM11 11h2v2h-2zM7 15h2v2H7zM11 15h2v2h-2zM11 19h2v2h-2z"/>
+  </svg>
+  Scan QR
           </Button>
           
           <Dropdown className="profile-dropdown">

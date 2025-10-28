@@ -11,6 +11,7 @@ import {
   Plus, 
   Eye, 
   Download,
+  Upload,
   Printer,
   User,
   Grid
@@ -21,12 +22,14 @@ const Guest = () => {
   const [filteredGuests, setFilteredGuests] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
   const [selectedGuest, setSelectedGuest] = useState(null);
   const [selectedQRGuest, setSelectedQRGuest] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchBy, setSearchBy] = useState('lastName');
+  const [csvFile, setCsvFile] = useState(null);
   const [imageFile, setImageFile] = useState(null);
 
   const searchOptions = [
@@ -193,6 +196,38 @@ const Guest = () => {
                         error.response?.data?.error || 
                         'Failed to create guest';
       toast.error(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleFileUpload = (e) => {
+    setCsvFile(e.target.files[0]);
+  };
+
+  const handleCsvUpload = async () => {
+    if (!csvFile) {
+      toast.error('Please select a CSV file');
+      return;
+    }
+
+    setIsLoading(true);
+    const formData = new FormData();
+    formData.append('csvFile', csvFile);
+
+    try {
+      const response = await axios.post('http://localhost:5000/guests/upload-csv', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      toast.success(response.data.message);
+      setShowUploadModal(false);
+      setCsvFile(null);
+      fetchGuests();
+    } catch (error) {
+      console.error('Error uploading CSV:', error);
+      toast.error(error.response?.data?.message || 'Failed to upload CSV');
     } finally {
       setIsLoading(false);
     }
@@ -1097,6 +1132,34 @@ const Guest = () => {
           <Button variant="dark" onClick={downloadQRCode} disabled={!selectedQRGuest?.qrCode}>
             <Download size={16} className="me-1" />
             Download QR
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      {/* CSV Upload Modal */}
+      <Modal show={showUploadModal} onHide={() => setShowUploadModal(false)}>
+        <Modal.Header closeButton>
+          <Modal.Title>Import Guests from CSV</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form.Group>
+            <Form.Label>Select CSV File</Form.Label>
+            <Form.Control
+              type="file"
+              accept=".csv"
+              onChange={handleFileUpload}
+            />
+            <Form.Text className="text-muted">
+              CSV should include columns: lastName, firstName, middleName, extension, dateOfBirth, sex, address, contact, visitPurpose
+            </Form.Text>
+          </Form.Group>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setShowUploadModal(false)}>
+            Cancel
+          </Button>
+          <Button variant="dark" onClick={handleCsvUpload} disabled={!csvFile || isLoading}>
+            {isLoading ? <Spinner size="sm" /> : 'Upload CSV'}
           </Button>
         </Modal.Footer>
       </Modal>

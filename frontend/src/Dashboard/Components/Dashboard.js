@@ -135,14 +135,14 @@ const Dashboard = () => {
   };
 
   const fetchActiveTimers = async () => {
-  try {
-    const response = await axios.get(ACTIVE_TIMERS_URL);
-    console.log('🕒 Active timers response:', response.data); // Debug log
-    setActiveTimers(response.data || []);
-  } catch (error) {
-    console.error("❌ Error fetching active timers:", error);
-  }
-};
+    try {
+      const response = await axios.get(ACTIVE_TIMERS_URL);
+      console.log('🕒 Active timers response:', response.data);
+      setActiveTimers(response.data || []);
+    } catch (error) {
+      console.error("❌ Error fetching active timers:", error);
+    }
+  };
 
   // Chart Data Preparation with REAL data from visitLogs
   const getWeeklyVisitData = () => {
@@ -240,112 +240,142 @@ const Dashboard = () => {
   };
 
   const getTimeOfDayData = () => {
-  console.log('🕒 Processing time of day data from visit logs:', visitLogs);
-  
-  const timeSlots = [
-    { name: 'Morning\n(6AM-12PM)', range: [6, 11], count: 0 },
-    { name: 'Afternoon\n(12PM-6PM)', range: [12, 17], count: 0 },
-    { name: 'Evening\n(6PM-12AM)', range: [18, 23], count: 0 },
-    { name: 'Night\n(12AM-6AM)', range: [0, 5], count: 0 }
-  ];
-
-  let processedCount = 0;
-  let errorCount = 0;
-
-  // Debug: Show all available time fields in the first few logs
-  if (visitLogs.length > 0) {
-    console.log('🔍 Available time fields in first log:', Object.keys(visitLogs[0]).filter(key => 
-      key.toLowerCase().includes('time') || 
-      key.toLowerCase().includes('date') ||
-      key === 'createdAt' || 
-      key === 'updatedAt'
-    ));
+    console.log('🕒 Processing time of day data from visit logs:', visitLogs);
     
-    // Show sample of time data
-    visitLogs.slice(0, 3).forEach((log, index) => {
-      console.log(`📋 Sample log ${index} time data:`, {
-        timeIn: log.timeIn,
-        visitTime: log.visitTime,
-        checkInTime: log.checkInTime,
-        createdAt: log.createdAt,
-        timestamp: log.timestamp,
-        visitDate: log.visitDate
+    const timeSlots = [
+      { name: 'Morning\n(6AM-12PM)', range: [6, 11], count: 0 },
+      { name: 'Afternoon\n(12PM-6PM)', range: [12, 17], count: 0 },
+      { name: 'Evening\n(6PM-12AM)', range: [18, 23], count: 0 },
+      { name: 'Night\n(12AM-6AM)', range: [0, 5], count: 0 }
+    ];
+
+    let processedCount = 0;
+    let errorCount = 0;
+
+    // Debug: Show all available time fields in the first few logs
+    if (visitLogs.length > 0) {
+      console.log('🔍 Available time fields in first log:', Object.keys(visitLogs[0]).filter(key => 
+        key.toLowerCase().includes('time') || 
+        key.toLowerCase().includes('date') ||
+        key === 'createdAt' || 
+        key === 'updatedAt'
+      ));
+      
+      // Show sample of time data
+      visitLogs.slice(0, 3).forEach((log, index) => {
+        console.log(`📋 Sample log ${index} time data:`, {
+          timeIn: log.timeIn,
+          visitTime: log.visitTime,
+          checkInTime: log.checkInTime,
+          createdAt: log.createdAt,
+          timestamp: log.timestamp,
+          visitDate: log.visitDate
+        });
       });
+    }
+
+    visitLogs.forEach((log, index) => {
+      // Try multiple possible time fields in order of likelihood
+      const timeFields = [
+        log.timeIn,
+        log.checkInTime, 
+        log.visitTime,
+        log.timestamp,
+        log.createdAt,
+        log.visitDate // Fallback to date if no time field
+      ];
+
+      let hour = null;
+      let usedField = null;
+
+      for (const field of timeFields) {
+        if (field && isValidDate(field)) {
+          try {
+            const date = new Date(field);
+            hour = date.getHours();
+            usedField = field;
+            break;
+          } catch (error) {
+            continue;
+          }
+        }
+      }
+
+      // If we found a valid hour, assign to time slot
+      if (hour !== null) {
+        console.log(`✅ Log ${index}: ${usedField} -> hour=${hour}`);
+        
+        let slotFound = false;
+        timeSlots.forEach(slot => {
+          if (hour >= slot.range[0] && hour <= slot.range[1]) {
+            slot.count++;
+            slotFound = true;
+            processedCount++;
+          }
+        });
+        
+        if (!slotFound) {
+          console.log(`❌ Hour ${hour} didn't match any time slot ranges`);
+        }
+      } else {
+        console.log(`❌ No valid time field found in log ${index}`);
+        errorCount++;
+      }
     });
-  }
 
-  visitLogs.forEach((log, index) => {
-    // Try multiple possible time fields in order of likelihood
-    const timeFields = [
-      log.timeIn,
-      log.checkInTime, 
-      log.visitTime,
-      log.timestamp,
-      log.createdAt,
-      log.visitDate // Fallback to date if no time field
+    console.log('📊 Time of day processing summary:', {
+      totalLogs: visitLogs.length,
+      successfullyProcessed: processedCount,
+      errors: errorCount,
+      timeSlotDistribution: timeSlots.map(slot => ({ name: slot.name, count: slot.count }))
+    });
+
+    const data = timeSlots.map(slot => ({
+      name: slot.name,
+      visits: slot.count
+    }));
+
+    return data;
+  };
+
+  // NEW: Get visitors by gender data
+  const getVisitorsByGenderData = () => {
+    console.log('🚻 Processing visitors by gender data');
+    
+    // Count male and female visitors
+    const maleVisitors = visitors.filter(visitor => 
+      visitor.gender === 'Male' || visitor.sex === 'Male'
+    ).length;
+    
+    const femaleVisitors = visitors.filter(visitor => 
+      visitor.gender === 'Female' || visitor.sex === 'Female'
+    ).length;
+
+    // Also count from visit logs if gender information exists there
+    const maleVisitLogs = visitLogs.filter(log => 
+      log.gender === 'Male' || log.sex === 'Male'
+    ).length;
+    
+    const femaleVisitLogs = visitLogs.filter(log => 
+      log.gender === 'Female' || log.sex === 'Female'
+    ).length;
+
+    // Use the larger count between registered visitors and visit logs
+    const data = [
+      { 
+        name: 'Male', 
+        value: Math.max(maleVisitors, maleVisitLogs),
+        color: COLORS.info // Blue for male
+      },
+      { 
+        name: 'Female', 
+        value: Math.max(femaleVisitors, femaleVisitLogs),
+        color: COLORS.danger // Red for female
+      }
     ];
 
-    let hour = null;
-    let usedField = null;
-
-    for (const field of timeFields) {
-      if (field && isValidDate(field)) {
-        try {
-          const date = new Date(field);
-          hour = date.getHours();
-          usedField = field;
-          break;
-        } catch (error) {
-          continue;
-        }
-      }
-    }
-
-    // If we found a valid hour, assign to time slot
-    if (hour !== null) {
-      console.log(`✅ Log ${index}: ${usedField} -> hour=${hour}`);
-      
-      let slotFound = false;
-      timeSlots.forEach(slot => {
-        if (hour >= slot.range[0] && hour <= slot.range[1]) {
-          slot.count++;
-          slotFound = true;
-          processedCount++;
-        }
-      });
-      
-      if (!slotFound) {
-        console.log(`❌ Hour ${hour} didn't match any time slot ranges`);
-      }
-    } else {
-      console.log(`❌ No valid time field found in log ${index}`);
-      errorCount++;
-    }
-  });
-
-  console.log('📊 Time of day processing summary:', {
-    totalLogs: visitLogs.length,
-    successfullyProcessed: processedCount,
-    errors: errorCount,
-    timeSlotDistribution: timeSlots.map(slot => ({ name: slot.name, count: slot.count }))
-  });
-
-  const data = timeSlots.map(slot => ({
-    name: slot.name,
-    visits: slot.count
-  }));
-
-  return data;
-};
-
-  const getStatusDistributionData = () => {
-    return [
-      { name: 'Approved Visitors', value: getApprovedVisitors() },
-      { name: 'Pending Visitors', value: getPendingVisitors() },
-      { name: 'Rejected Visitors', value: getRejectedVisitors() },
-      { name: 'Approved Guests', value: getApprovedGuests() },
-      { name: 'Pending Guests', value: getPendingGuests() }
-    ];
+    console.log('📈 Visitors by gender data:', data);
+    return data;
   };
 
   // Custom Tooltip for charts
@@ -400,8 +430,15 @@ const Dashboard = () => {
   const getTotalInmates = () => inmates.length;
   const getTotalVisitors = () => visitors.length;
   const getTotalGuests = () => guests.length;
-  const getMaleInmates = () => inmates.filter(i => i.sex === "Male").length;
-  const getFemaleInmates = () => inmates.filter(i => i.sex === "Female").length;
+  
+  // Gender statistics for inmates
+  const getMaleInmates = () => inmates.filter(i => i.sex === "Male" || i.gender === "Male").length;
+  const getFemaleInmates = () => inmates.filter(i => i.sex === "Female" || i.gender === "Female").length;
+  
+  // NEW: Gender statistics for visitors
+  const getMaleVisitors = () => visitors.filter(v => v.sex === "Male" || v.gender === "Male").length;
+  const getFemaleVisitors = () => visitors.filter(v => v.sex === "Female" || v.gender === "Female").length;
+  
   const getPendingVisitors = () => visitors.filter(v => v.status === "pending").length;
   const getApprovedVisitors = () => visitors.filter(v => v.status === "approved").length;
   const getRejectedVisitors = () => visitors.filter(v => v.status === "rejected").length;
@@ -506,58 +543,58 @@ const Dashboard = () => {
   };
 
   const formatTimeIn = (timeIn) => {
-  console.log('🕒 Formatting timeIn:', timeIn);
-  
-  if (!timeIn) {
-    console.log('❌ No timeIn provided');
-    return 'N/A';
-  }
-
-  // If it's already a formatted time string (like "2:30 PM"), just return it
-  if (typeof timeIn === 'string' && (timeIn.includes('AM') || timeIn.includes('PM'))) {
-    console.log('✅ Already formatted time string:', timeIn);
-    return timeIn;
-  }
-
-  // If it's a Date object or ISO string, format it
-  if (isValidDate(timeIn)) {
-    try {
-      const date = new Date(timeIn);
-      const formattedTime = date.toLocaleTimeString('en-US', { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        hour12: true 
-      });
-      console.log('✅ Formatted date to time:', timeIn, '->', formattedTime);
-      return formattedTime;
-    } catch (error) {
-      console.error('❌ Error formatting date:', error);
+    console.log('🕒 Formatting timeIn:', timeIn);
+    
+    if (!timeIn) {
+      console.log('❌ No timeIn provided');
       return 'N/A';
     }
-  }
 
-  // If it's a simple time string without AM/PM, try to parse it
-  if (typeof timeIn === 'string' && timeIn.includes(':')) {
-    try {
-      const [hours, minutes] = timeIn.split(':');
-      const hour = parseInt(hours);
-      const minute = parseInt(minutes);
-      
-      if (!isNaN(hour) && !isNaN(minute)) {
-        const period = hour >= 12 ? 'PM' : 'AM';
-        const twelveHour = hour % 12 || 12;
-        const formattedTime = `${twelveHour}:${minute.toString().padStart(2, '0')} ${period}`;
-        console.log('✅ Parsed time string:', timeIn, '->', formattedTime);
-        return formattedTime;
-      }
-    } catch (error) {
-      console.error('❌ Error parsing time string:', error);
+    // If it's already a formatted time string (like "2:30 PM"), just return it
+    if (typeof timeIn === 'string' && (timeIn.includes('AM') || timeIn.includes('PM'))) {
+      console.log('✅ Already formatted time string:', timeIn);
+      return timeIn;
     }
-  }
 
-  console.log('❌ Could not format timeIn:', timeIn);
-  return 'N/A';
-};
+    // If it's a Date object or ISO string, format it
+    if (isValidDate(timeIn)) {
+      try {
+        const date = new Date(timeIn);
+        const formattedTime = date.toLocaleTimeString('en-US', { 
+          hour: '2-digit', 
+          minute: '2-digit',
+          hour12: true 
+        });
+        console.log('✅ Formatted date to time:', timeIn, '->', formattedTime);
+        return formattedTime;
+      } catch (error) {
+        console.error('❌ Error formatting date:', error);
+        return 'N/A';
+      }
+    }
+
+    // If it's a simple time string without AM/PM, try to parse it
+    if (typeof timeIn === 'string' && timeIn.includes(':')) {
+      try {
+        const [hours, minutes] = timeIn.split(':');
+        const hour = parseInt(hours);
+        const minute = parseInt(minutes);
+        
+        if (!isNaN(hour) && !isNaN(minute)) {
+          const period = hour >= 12 ? 'PM' : 'AM';
+          const twelveHour = hour % 12 || 12;
+          const formattedTime = `${twelveHour}:${minute.toString().padStart(2, '0')} ${period}`;
+          console.log('✅ Parsed time string:', timeIn, '->', formattedTime);
+          return formattedTime;
+        }
+      } catch (error) {
+        console.error('❌ Error parsing time string:', error);
+      }
+    }
+
+    console.log('❌ Could not format timeIn:', timeIn);
+    return 'N/A';
+  };
 
   const getTimerVariant = (minutes) => {
     if (minutes === null || minutes === undefined || isNaN(minutes)) return 'secondary';
@@ -659,7 +696,7 @@ const Dashboard = () => {
         </Row>
       )}
 
-      {/* Active Timers Section */}
+      {/* Active Timers Section - Compact Version */}
       <Row className="mb-4">
         <Col>
           <Card className="shadow-sm border-0">
@@ -687,13 +724,13 @@ const Dashboard = () => {
                 </div>
               </h5>
             </Card.Header>
-            <Card.Body className="p-3">
+            <Card.Body className="p-2">
               {activeTimers.length > 0 ? (
                 <>
                   {getTopUrgentTimers().map((timer, index) => (
                     <div 
                       key={timer._id || index}
-                      className={`mb-3 p-3 border rounded ${
+                      className={`mb-2 p-2 border rounded ${
                         timer.timeRemainingMinutes < 10 
                           ? 'border-danger bg-danger bg-opacity-10' 
                           : timer.timeRemainingMinutes < 30 
@@ -702,10 +739,10 @@ const Dashboard = () => {
                       }`}
                     >
                       <Row className="align-items-center">
-                        <Col md={4}>
+                        <Col md={5}>
                           <div className="d-flex align-items-center">
-                            <div className="me-3">
-                              <FaUserClock size={24} className={
+                            <div className="me-2">
+                              <FaUserClock size={18} className={
                                 timer.timeRemainingMinutes < 10 
                                   ? 'text-danger' 
                                   : timer.timeRemainingMinutes < 30 
@@ -713,40 +750,39 @@ const Dashboard = () => {
                                   : 'text-success'
                               } />
                             </div>
-                            <div>
-                              <div className="fw-bold fs-6">{timer.personName || 'Unknown Visitor'}</div>
-                              <div className="text-muted small">
-                                Timed In: {formatTimeIn(timer.timeIn)}
+                            <div className="flex-grow-1">
+                              <div className="fw-bold small">{timer.personName || 'Unknown Visitor'}</div>
+                              <div className="text-muted extra-small">
+                                In: {formatTimeIn(timer.timeIn)}
                               </div>
-                              <div className="small text-muted">
-                                Visitor ID: {timer.personId || 'N/A'}
+                              <div className="extra-small text-muted">
+                                ID: {timer.personId || 'N/A'}
                               </div>
                             </div>
                           </div>
                         </Col>
                         <Col md={3}>
-                          <div className="small">
-                            <div className="fw-bold">Prisoner:</div>
-                            <div className="text-muted">{timer.prisonerId || 'N/A'}</div>
-                            <div className="fw-bold mt-1">Inmate:</div>
+                          <div className="extra-small">
+                            <div className="fw-bold">Inmate:</div>
                             <div className="text-muted">{timer.inmateName || 'N/A'}</div>
                           </div>
                         </Col>
-                        <Col md={3}>
-                          <div className="d-flex align-items-center">
+                        <Col md={2}>
+                          <div className="text-center">
                             <Badge 
                               bg={getTimerVariant(timer.timeRemainingMinutes)} 
-                              className="me-3 p-2 fs-6"
+                              className="p-1 small"
+                              style={{ fontSize: '0.75rem' }}
                             >
                               {formatTimeRemaining(timer.timeRemainingMinutes)}
                             </Badge>
-                            <div className="flex-grow-1" style={{ maxWidth: '120px' }}>
+                            <div className="mt-1" style={{ maxWidth: '80px', margin: '0 auto' }}>
                               <ProgressBar 
                                 now={getTimerProgress(timer.timeRemainingMinutes)} 
                                 variant={getTimerVariant(timer.timeRemainingMinutes)}
                                 animated={timer.timeRemainingMinutes < 30}
                                 style={{ 
-                                  height: '10px',
+                                  height: '6px',
                                   backgroundColor: '#e9ecef'
                                 }}
                               />
@@ -755,18 +791,18 @@ const Dashboard = () => {
                         </Col>
                         <Col md={2} className="text-center">
                           {timer.timeRemainingMinutes < 10 && (
-                            <Badge bg="danger" className="p-2 fs-6">
-                              ⚠️ Critical
+                            <Badge bg="danger" className="p-1 small" style={{ fontSize: '0.7rem' }}>
+                              Critical
                             </Badge>
                           )}
                           {timer.timeRemainingMinutes >= 10 && timer.timeRemainingMinutes < 30 && (
-                            <Badge bg="warning" text="dark" className="p-2 fs-6">
-                              🔥 Urgent
+                            <Badge bg="warning" text="dark" className="p-1 small" style={{ fontSize: '0.7rem' }}>
+                              Urgent
                             </Badge>
                           )}
                           {timer.timeRemainingMinutes >= 30 && (
-                            <Badge bg="success" className="p-2 fs-6">
-                              ✅ Active
+                            <Badge bg="success" className="p-1 small" style={{ fontSize: '0.7rem' }}>
+                              Active
                             </Badge>
                           )}
                         </Col>
@@ -775,8 +811,8 @@ const Dashboard = () => {
                   ))}
                   
                   {activeTimers.length > 5 && (
-                    <div className="text-center mt-3">
-                      <Alert variant="info" className="mb-0">
+                    <div className="text-center mt-2">
+                      <Alert variant="info" className="mb-0 py-2">
                         <strong>... and {activeTimers.length - 5} more active visitor timers</strong>
                         <br />
                         <small>Total {activeTimers.length} visitors with active 3-hour timers</small>
@@ -785,13 +821,11 @@ const Dashboard = () => {
                   )}
                 </>
               ) : (
-                <div className="text-center py-4">
-                  <FaUserClock size={48} className="text-muted mb-3" />
-                  <h5 className="text-muted">No Active Visitor Timers</h5>
-                  <p className="text-muted">
+                <div className="text-center py-3">
+                  <FaUserClock size={32} className="text-muted mb-2" />
+                  <h6 className="text-muted">No Active Visitor Timers</h6>
+                  <p className="text-muted small mb-0">
                     When visitors check in and are approved, their 3-hour timers will appear here.
-                    <br />
-                    <small>Guests do not have timers - only time in/out recording.</small>
                   </p>
                 </div>
               )}
@@ -810,6 +844,7 @@ const Dashboard = () => {
         </Col>
       </Row>
       <Row className="mb-4 g-3">
+        {/* Total Inmates Card */}
         <Col md={3}>
           <Card className="text-center h-100 shadow-sm border-0">
             <Card.Body className="p-3">
@@ -826,6 +861,7 @@ const Dashboard = () => {
           </Card>
         </Col>
 
+        {/* Total Visitors Card */}
         <Col md={3}>
           <Card className="text-center h-100 shadow-sm border-0">
             <Card.Body className="p-3">
@@ -835,16 +871,85 @@ const Dashboard = () => {
                 {getTotalVisitors()}
               </Card.Text>
               <div className="small text-muted">
-                <FaUserCheck className="text-success me-1" /> {getApprovedVisitors()} Approved
+                <FaMars className="text-info me-1" /> {getMaleVisitors()} Male • 
+                <FaVenus className="text-danger ms-2 me-1" /> {getFemaleVisitors()} Female
               </div>
             </Card.Body>
           </Card>
         </Col>
 
+        {/* Total Male Inmates Card */}
         <Col md={3}>
           <Card className="text-center h-100 shadow-sm border-0">
             <Card.Body className="p-3">
-              <FaUserFriends size={30} className="mb-2" style={{ color: COLORS.info }} />
+              <FaMars size={30} className="mb-2" style={{ color: COLORS.info }} />
+              <Card.Title style={{ fontSize: "1rem", color: COLORS.dark }}>Male Inmates</Card.Title>
+              <Card.Text style={{ fontSize: "1.8rem", fontWeight: "bold", color: COLORS.dark }}>
+                {getMaleInmates()}
+              </Card.Text>
+              <div className="small text-muted">
+                Total male inmate population
+              </div>
+            </Card.Body>
+          </Card>
+        </Col>
+
+        {/* Total Female Inmates Card */}
+        <Col md={3}>
+          <Card className="text-center h-100 shadow-sm border-0">
+            <Card.Body className="p-3">
+              <FaVenus size={30} className="mb-2" style={{ color: COLORS.danger }} />
+              <Card.Title style={{ fontSize: "1rem", color: COLORS.dark }}>Female Inmates</Card.Title>
+              <Card.Text style={{ fontSize: "1.8rem", fontWeight: "bold", color: COLORS.dark }}>
+                {getFemaleInmates()}
+              </Card.Text>
+              <div className="small text-muted">
+                Total female inmate population
+              </div>
+            </Card.Body>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Additional Gender Statistics */}
+      <Row className="mb-4 g-3">
+        {/* Total Male Visitors Card */}
+        <Col md={3}>
+          <Card className="text-center h-100 shadow-sm border-0">
+            <Card.Body className="p-3">
+              <FaMars size={30} className="mb-2" style={{ color: COLORS.info }} />
+              <Card.Title style={{ fontSize: "1rem", color: COLORS.dark }}>Male Visitors</Card.Title>
+              <Card.Text style={{ fontSize: "1.8rem", fontWeight: "bold", color: COLORS.dark }}>
+                {getMaleVisitors()}
+              </Card.Text>
+              <div className="small text-muted">
+                Total registered male visitors
+              </div>
+            </Card.Body>
+          </Card>
+        </Col>
+
+        {/* Total Female Visitors Card */}
+        <Col md={3}>
+          <Card className="text-center h-100 shadow-sm border-0">
+            <Card.Body className="p-3">
+              <FaVenus size={30} className="mb-2" style={{ color: COLORS.danger }} />
+              <Card.Title style={{ fontSize: "1rem", color: COLORS.dark }}>Female Visitors</Card.Title>
+              <Card.Text style={{ fontSize: "1.8rem", fontWeight: "bold", color: COLORS.dark }}>
+                {getFemaleVisitors()}
+              </Card.Text>
+              <div className="small text-muted">
+                Total registered female visitors
+              </div>
+            </Card.Body>
+          </Card>
+        </Col>
+
+        {/* Total Guests Card */}
+        <Col md={3}>
+          <Card className="text-center h-100 shadow-sm border-0">
+            <Card.Body className="p-3">
+              <FaUserFriends size={30} className="mb-2" style={{ color: COLORS.warning }} />
               <Card.Title style={{ fontSize: "1rem", color: COLORS.dark }}>Total Guests</Card.Title>
               <Card.Text style={{ fontSize: "1.8rem", fontWeight: "bold", color: COLORS.dark }}>
                 {getTotalGuests()}
@@ -856,10 +961,11 @@ const Dashboard = () => {
           </Card>
         </Col>
 
+        {/* Total System Users Card */}
         <Col md={3}>
           <Card className="text-center h-100 shadow-sm border-0">
             <Card.Body className="p-3">
-              <FaUser size={30} className="mb-2" style={{ color: COLORS.warning }} />
+              <FaUser size={30} className="mb-2" style={{ color: COLORS.purple }} />
               <Card.Title style={{ fontSize: "1rem", color: COLORS.dark }}>Total System Users</Card.Title>
               <Card.Text style={{ fontSize: "1.8rem", fontWeight: "bold", color: COLORS.dark }}>
                 {getTotalUsers()}
@@ -991,35 +1097,68 @@ const Dashboard = () => {
               </Card>
             </Col>
 
-           {/* Time of Day Visits Bar Chart */}
-<Col md={6}>
-  <Card className="shadow-sm border-0 h-100">
-    <Card.Header style={{ backgroundColor: COLORS.warning, color: 'white' }}>
-      <h6 className="mb-0">Visits by Time of Day</h6>
-    </Card.Header>
-    <Card.Body>
-      {getTimeOfDayData().some(slot => slot.visits > 0) ? (
-        <ResponsiveContainer width="100%" height={250}>
-          <BarChart data={getTimeOfDayData()}>
-            <CartesianGrid strokeDasharray="3 3" stroke={COLORS.light} />
-            <XAxis dataKey="name" stroke={COLORS.dark} />
-            <YAxis stroke={COLORS.dark} />
-            <Tooltip content={<CustomTooltip />} />
-            <Bar dataKey="visits" fill={COLORS.danger} radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      ) : (
-        <EmptyChartState 
-          message={
-            visitLogs.length > 0 
-              ? "No time data found in visit logs. Check if time fields exist."
-              : "No visit data available"
-          } 
-        />
-      )}
-    </Card.Body>
-  </Card>
-</Col>
+            {/* Visitors by Gender Pie Chart */}
+            <Col md={6}>
+              <Card className="shadow-sm border-0 h-100">
+                <Card.Header style={{ backgroundColor: COLORS.warning, color: 'white' }}>
+                  <h6 className="mb-0">Visitors by Gender</h6>
+                </Card.Header>
+                <Card.Body>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <PieChart>
+                      <Pie
+                        data={getVisitorsByGenderData()}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {getVisitorsByGenderData().map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </Card.Body>
+              </Card>
+            </Col>
+          </Row>
+
+          <Row className="mb-4 g-3">
+            {/* Time of Day Visits Bar Chart */}
+            <Col md={6}>
+              <Card className="shadow-sm border-0 h-100">
+                <Card.Header style={{ backgroundColor: COLORS.danger, color: 'white' }}>
+                  <h6 className="mb-0">Visits by Time of Day</h6>
+                </Card.Header>
+                <Card.Body>
+                  {getTimeOfDayData().some(slot => slot.visits > 0) ? (
+                    <ResponsiveContainer width="100%" height={250}>
+                      <BarChart data={getTimeOfDayData()}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.light} />
+                        <XAxis dataKey="name" stroke={COLORS.dark} />
+                        <YAxis stroke={COLORS.dark} />
+                        <Tooltip content={<CustomTooltip />} />
+                        <Bar dataKey="visits" fill={COLORS.secondary} radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <EmptyChartState 
+                      message={
+                        visitLogs.length > 0 
+                          ? "No time data found in visit logs. Check if time fields exist."
+                          : "No visit data available"
+                      } 
+                    />
+                  )}
+                </Card.Body>
+              </Card>
+            </Col>
           </Row>
         </>
       )}
@@ -1155,73 +1294,6 @@ const Dashboard = () => {
               <div className="small text-muted">
                 All time visit records
               </div>
-            </Card.Body>
-          </Card>
-        </Col>
-      </Row>
-
-      {/* Status Breakdown */}
-      <Row className="mb-4">
-        <Col>
-          <h5 className="mb-3" style={{ color: COLORS.dark, borderBottom: "1px solid #dee2e6", paddingBottom: "8px" }}>
-            <FaChartBar className="me-2" />
-            Status Breakdown
-          </h5>
-        </Col>
-      </Row>
-      <Row className="mb-4 g-3">
-        <Col md={6}>
-          <Card className="text-center h-100 shadow-sm border-0">
-            <Card.Header style={{ backgroundColor: COLORS.primary, color: 'white' }}>
-              <h6 className="mb-0">Visitor Status</h6>
-            </Card.Header>
-            <Card.Body className="p-3">
-              <Row>
-                <Col>
-                  <div className="d-flex justify-content-between align-items-center mb-2">
-                    <span>Approved:</span>
-                    <Badge bg="success">{getApprovedVisitors()}</Badge>
-                  </div>
-                  <div className="d-flex justify-content-between align-items-center mb-2">
-                    <span>Pending:</span>
-                    <Badge bg="warning" text="dark">{getPendingVisitors()}</Badge>
-                  </div>
-                  <div className="d-flex justify-content-between align-items-center">
-                    <span>Rejected:</span>
-                    <Badge bg="danger">{getRejectedVisitors()}</Badge>
-                  </div>
-                </Col>
-              </Row>
-            </Card.Body>
-          </Card>
-        </Col>
-
-        <Col md={6}>
-          <Card className="text-center h-100 shadow-sm border-0">
-            <Card.Header style={{ backgroundColor: COLORS.info, color: 'white' }}>
-              <h6 className="mb-0">Guest Status</h6>
-            </Card.Header>
-            <Card.Body className="p-3">
-              <Row>
-                <Col>
-                  <div className="d-flex justify-content-between align-items-center mb-2">
-                    <span>Approved:</span>
-                    <Badge bg="success">{getApprovedGuests()}</Badge>
-                  </div>
-                  <div className="d-flex justify-content-between align-items-center mb-2">
-                    <span>Pending:</span>
-                    <Badge bg="warning" text="dark">{getPendingGuests()}</Badge>
-                  </div>
-                  <div className="d-flex justify-content-between align-items-center mb-2">
-                    <span>Rejected:</span>
-                    <Badge bg="danger">{getRejectedGuests()}</Badge>
-                  </div>
-                  <div className="d-flex justify-content-between align-items-center">
-                    <span>Completed:</span>
-                    <Badge bg="secondary">{getCompletedGuests()}</Badge>
-                  </div>
-                </Col>
-              </Row>
             </Card.Body>
           </Card>
         </Col>

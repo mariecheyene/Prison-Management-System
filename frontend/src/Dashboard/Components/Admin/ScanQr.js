@@ -84,7 +84,13 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       const cameras = await QrScanner.listCameras();
       setAvailableCameras(cameras);
       if (cameras.length > 0) {
-        setSelectedCamera(cameras[0].id);
+        // Try to find rear camera first, otherwise use first available
+        const rearCamera = cameras.find(cam => 
+          cam.label.toLowerCase().includes('back') || 
+          cam.label.toLowerCase().includes('rear') ||
+          cam.label.toLowerCase().includes('environment')
+        );
+        setSelectedCamera(rearCamera ? rearCamera.id : cameras[0].id);
       }
     } catch (error) {
       console.log('Cannot list cameras:', error);
@@ -125,10 +131,10 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
           highlightCodeOutline: true,
           returnDetailedScanResult: true,
           maxScansPerSecond: 2,
-          preferredCamera: 'environment',
           
+          // FIXED: Remove mirroring and use proper camera orientation
           calculateScanRegion: (video) => {
-            const size = Math.min(video.videoWidth, video.videoHeight) * 0.8;
+            const size = Math.min(video.videoWidth, video.videoHeight) * 0.7;
             return {
               x: (video.videoWidth - size) / 2,
               y: (video.videoHeight - size) / 2,
@@ -152,9 +158,16 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       
       await newScanner.start();
       
+      // FIXED: Remove mirror effect for non-front cameras
       if (videoRef.current) {
-        videoRef.current.style.transform = 'scaleX(1)';
-        videoRef.current.style.webkitTransform = 'scaleX(1)';
+        const isFrontCamera = selectedCamera && cameras.find(cam => cam.id === selectedCamera)?.label.toLowerCase().includes('front');
+        if (!isFrontCamera) {
+          videoRef.current.style.transform = 'scaleX(1)'; // Normal orientation for rear camera
+          videoRef.current.style.webkitTransform = 'scaleX(1)';
+        } else {
+          videoRef.current.style.transform = 'scaleX(-1)'; // Mirror only for front camera
+          videoRef.current.style.webkitTransform = 'scaleX(-1)';
+        }
       }
       
       setScanner(newScanner);
@@ -519,42 +532,13 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     }
   };
 
-  const handleDeclineVisit = async () => {
-    if (!scannedPerson) return;
-
-    try {
-      setIsApproving(true);
-      
-      const personType = scannedPerson.personType;
-      await axios.put(`http://localhost:5000/${personType}s/${scannedPerson.id}`, {
-        status: 'rejected'
-      });
-      
-      // Refresh data after decline
-      const freshPersonData = await refreshPersonData(scannedPerson.id, personType);
-      
-      // Generate full name for refreshed data
-      const personWithFullName = {
-        ...(freshPersonData || scannedPerson),
-        fullName: generateFullName(freshPersonData || scannedPerson)
-      };
-      
-      setScannedPerson({
-        ...personWithFullName,
-        scanType: 'declined',
-        scanMessage: '❌ Visit request declined'
-      });
-
-    } catch (error) {
-      console.error('Error declining visit:', error);
-      setScannedPerson({
-        ...scannedPerson,
-        scanType: 'error',
-        scanMessage: 'Failed to decline visit. Please try again.'
-      });
-    } finally {
-      setIsApproving(false);
-    }
+  const handleDeclineVisit = () => {
+    // Simply close the modal without making any API calls
+    setScannedPerson({
+      ...scannedPerson,
+      scanType: 'declined',
+      scanMessage: '❌ Visit request declined - no time recorded'
+    });
   };
 
   const handleClosePersonModal = () => {
@@ -568,6 +552,9 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     setUploadedImage(null);
     setIsProcessingUpload(false);
     setUploadProgress(0);
+    
+    // NEW: Close the entire scanner when person modal is closed
+    handleCloseScanner();
   };
 
   const handleCloseScanner = () => {
@@ -621,16 +608,6 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       age--;
     }
     return age;
-  };
-
-  const getStatusVariant = (status) => {
-    switch (status) {
-      case 'approved': return 'success';
-      case 'pending': return 'warning';
-      case 'rejected': return 'danger';
-      case 'completed': return 'info';
-      default: return 'secondary';
-    }
   };
 
   const getTimeStatus = (person) => {
@@ -744,9 +721,7 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
             </div>
             <h4 className="mb-1">{displayName}</h4>
             <div>
-              <Badge bg={getStatusVariant(scannedPerson.status)} className="fs-6 me-2">
-                {scannedPerson.status?.toUpperCase()}
-              </Badge>
+              {/* REMOVED: Status badge (approved/rejected) */}
               <Badge bg={isGuest ? 'info' : 'primary'} className="fs-6">
                 {isGuest ? 'GUEST' : 'VISITOR'}
               </Badge>
@@ -807,13 +782,13 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
                 {isGuest ? (
                   <>
                     <p><strong>Visit Purpose:</strong> {scannedPerson.visitPurpose}</p>
-                    <p><strong>Created At:</strong> {scannedPerson.createdAt ? new Date(scannedPerson.createdAt).toLocaleString() : 'N/A'}</p>
+                    {/* REMOVED: Created At field */}
                   </>
                 ) : (
                   <>
                     <p><strong>Prisoner ID:</strong> {scannedPerson.prisonerId}</p>
                     <p><strong>Relationship:</strong> {scannedPerson.relationship}</p>
-                    <p><strong>Visit Approved:</strong> {scannedPerson.visitApproved ? 'Yes' : 'No'}</p>
+                    {/* REMOVED: Visit Approved field */}
                   </>
                 )}
               </Card.Body>
@@ -887,8 +862,7 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
                     border: scanSuccess ? '3px solid #28a745' : '2px solid #dee2e6',
                     borderRadius: '8px',
                     backgroundColor: '#000',
-                    transform: 'scaleX(1)',
-                    WebkitTransform: 'scaleX(1)',
+                    // Transform is now handled dynamically in initializeScanner
                   }}
                 ></video>
                 

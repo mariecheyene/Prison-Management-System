@@ -84,7 +84,13 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       const cameras = await QrScanner.listCameras();
       setAvailableCameras(cameras);
       if (cameras.length > 0) {
-        setSelectedCamera(cameras[0].id);
+        // Try to find rear camera first, otherwise use first available
+        const rearCamera = cameras.find(cam => 
+          cam.label.toLowerCase().includes('back') || 
+          cam.label.toLowerCase().includes('rear') ||
+          cam.label.toLowerCase().includes('environment')
+        );
+        setSelectedCamera(rearCamera ? rearCamera.id : cameras[0].id);
       }
     } catch (error) {
       console.log('Cannot list cameras:', error);
@@ -125,10 +131,10 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
           highlightCodeOutline: true,
           returnDetailedScanResult: true,
           maxScansPerSecond: 2,
-          preferredCamera: 'environment',
           
+          // FIXED: Remove mirroring and use proper camera orientation
           calculateScanRegion: (video) => {
-            const size = Math.min(video.videoWidth, video.videoHeight) * 0.8;
+            const size = Math.min(video.videoWidth, video.videoHeight) * 0.7;
             return {
               x: (video.videoWidth - size) / 2,
               y: (video.videoHeight - size) / 2,
@@ -152,9 +158,16 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       
       await newScanner.start();
       
+      // FIXED: Remove mirror effect for non-front cameras
       if (videoRef.current) {
-        videoRef.current.style.transform = 'scaleX(1)';
-        videoRef.current.style.webkitTransform = 'scaleX(1)';
+        const isFrontCamera = selectedCamera && cameras.find(cam => cam.id === selectedCamera)?.label.toLowerCase().includes('front');
+        if (!isFrontCamera) {
+          videoRef.current.style.transform = 'scaleX(1)'; // Normal orientation for rear camera
+          videoRef.current.style.webkitTransform = 'scaleX(1)';
+        } else {
+          videoRef.current.style.transform = 'scaleX(-1)'; // Mirror only for front camera
+          videoRef.current.style.webkitTransform = 'scaleX(-1)';
+        }
       }
       
       setScanner(newScanner);
@@ -293,60 +306,17 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     }
   };
 
-  // ENHANCED: Refresh person data with visit history
+  // Refresh person data to get complete details
   const refreshPersonData = async (personId, personType) => {
     try {
       console.log('🔄 Refreshing person data for:', personId, personType);
-      
-      // Get basic person data
-      const personResponse = await axios.get(`http://localhost:5000/${personType}s/${personId}`);
-      console.log('✅ Basic person data:', personResponse.data);
-      
-      // Get visit history data
-      const historyResponse = await axios.get(`http://localhost:5000/${personType}s/${personId}/visit-history?limit=50`);
-      console.log('✅ Visit history data:', historyResponse.data);
-      
-      // Combine the data
-      const completeData = {
-        ...personResponse.data,
-        visitHistory: historyResponse.data.visitHistory || [],
-        totalVisits: historyResponse.data.totalVisits || 0
-      };
-      
-      console.log('✅ Complete person data with history:', completeData);
-      return completeData;
+      const response = await axios.get(`http://localhost:5000/${personType}s/${personId}`);
+      console.log('✅ Refreshed person data:', response.data);
+      return response.data;
     } catch (error) {
       console.error('❌ Error refreshing person data:', error);
-      
-      // If visit history endpoint fails, still return basic person data
-      try {
-        const personResponse = await axios.get(`http://localhost:5000/${personType}s/${personId}`);
-        return personResponse.data;
-      } catch (fallbackError) {
-        console.error('❌ Fallback also failed:', fallbackError);
-        return null;
-      }
+      return null;
     }
-  };
-
-  // NEW: Get the most recent visit date from visit history
-  const getLastVisitDate = (person) => {
-    if (!person) return null;
-    
-    // First try the direct fields
-    if (person.lastVisitDate) return person.lastVisitDate;
-    if (person.dateVisited) return person.dateVisited;
-    
-    // Then try visit history
-    if (person.visitHistory && person.visitHistory.length > 0) {
-      // Sort by visit date descending and get the most recent
-      const sortedHistory = [...person.visitHistory].sort((a, b) => 
-        new Date(b.visitDate) - new Date(a.visitDate)
-      );
-      return sortedHistory[0]?.visitDate || null;
-    }
-    
-    return null;
   };
 
   // Generate full name from individual name fields
@@ -435,15 +405,13 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
         return;
       }
 
-      // ENHANCED: Refresh person data with visit history
+      // Refresh person data to ensure we have complete details
       const completePersonData = await refreshPersonData(personId, isGuest ? 'guest' : 'visitor');
       
       // Generate full name if it doesn't exist
       const personWithFullName = {
         ...(completePersonData || scanResult.person),
-        fullName: generateFullName(completePersonData || scanResult.person),
-        // Calculate last visit date from history
-        calculatedLastVisitDate: getLastVisitDate(completePersonData || scanResult.person)
+        fullName: generateFullName(completePersonData || scanResult.person)
       };
 
       // Set scanned person with complete data and scan type from backend
@@ -507,7 +475,7 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       const response = await axios.put(endpoint);
       console.log('✅ BACKEND RESPONSE:', response.data);
 
-      // ENHANCED: Refresh person data with visit history after approval
+      // REFRESH: Get complete person data after approval
       const freshPersonData = await refreshPersonData(scannedPerson.id, personType);
       
       let updatedPersonData = freshPersonData || scannedPerson; // Fallback to original if refresh fails
@@ -528,9 +496,7 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       // Generate full name for the updated data
       const updatedPersonWithFullName = {
         ...updatedPersonData,
-        fullName: generateFullName(updatedPersonData),
-        // Recalculate last visit date
-        calculatedLastVisitDate: getLastVisitDate(updatedPersonData)
+        fullName: generateFullName(updatedPersonData)
       };
 
       // FIXED: Proper merge with all original data preserved
@@ -566,43 +532,13 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     }
   };
 
-  const handleDeclineVisit = async () => {
-    if (!scannedPerson) return;
-
-    try {
-      setIsApproving(true);
-      
-      const personType = scannedPerson.personType;
-      await axios.put(`http://localhost:5000/${personType}s/${scannedPerson.id}`, {
-        status: 'rejected'
-      });
-      
-      // ENHANCED: Refresh data with visit history after decline
-      const freshPersonData = await refreshPersonData(scannedPerson.id, personType);
-      
-      // Generate full name for refreshed data
-      const personWithFullName = {
-        ...(freshPersonData || scannedPerson),
-        fullName: generateFullName(freshPersonData || scannedPerson),
-        calculatedLastVisitDate: getLastVisitDate(freshPersonData || scannedPerson)
-      };
-      
-      setScannedPerson({
-        ...personWithFullName,
-        scanType: 'declined',
-        scanMessage: '❌ Visit request declined'
-      });
-
-    } catch (error) {
-      console.error('Error declining visit:', error);
-      setScannedPerson({
-        ...scannedPerson,
-        scanType: 'error',
-        scanMessage: 'Failed to decline visit. Please try again.'
-      });
-    } finally {
-      setIsApproving(false);
-    }
+  const handleDeclineVisit = () => {
+    // Simply close the modal without making any API calls
+    setScannedPerson({
+      ...scannedPerson,
+      scanType: 'declined',
+      scanMessage: '❌ Visit request declined - no time recorded'
+    });
   };
 
   const handleClosePersonModal = () => {
@@ -616,6 +552,9 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     setUploadedImage(null);
     setIsProcessingUpload(false);
     setUploadProgress(0);
+    
+    // NEW: Close the entire scanner when person modal is closed
+    handleCloseScanner();
   };
 
   const handleCloseScanner = () => {
@@ -671,16 +610,6 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     return age;
   };
 
-  const getStatusVariant = (status) => {
-    switch (status) {
-      case 'approved': return 'success';
-      case 'pending': return 'warning';
-      case 'rejected': return 'danger';
-      case 'completed': return 'info';
-      default: return 'secondary';
-    }
-  };
-
   const getTimeStatus = (person) => {
     if (!person.hasTimedIn) return { variant: 'secondary', text: 'Not Checked In' };
     if (person.hasTimedIn && !person.hasTimedOut) return { variant: 'success', text: 'Checked In' };
@@ -725,40 +654,6 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     }
     
     return timeString;
-  };
-
-  // ENHANCED: Format last visit date display with multiple fallbacks
-  const formatLastVisitDisplay = (person) => {
-    if (!person) return 'No previous visits';
-    
-    // Try multiple sources for last visit date
-    const lastVisitDate = 
-      person.calculatedLastVisitDate || // From our enhanced calculation
-      person.lastVisitDate ||           // Direct field
-      person.dateVisited ||             // Alternative field
-      (person.visitHistory && person.visitHistory.length > 0 ? 
-        person.visitHistory[0]?.visitDate : null); // From history
-    
-    if (lastVisitDate) {
-      try {
-        return new Date(lastVisitDate).toLocaleDateString();
-      } catch (error) {
-        console.error('Error formatting last visit date:', error);
-        return 'Invalid date';
-      }
-    }
-    
-    // Check if they have any visit history at all
-    if (person.visitHistory && person.visitHistory.length > 0) {
-      return 'Has visit history (date unavailable)';
-    }
-    
-    // Check total visits count
-    if (person.totalVisits && person.totalVisits > 0) {
-      return `Has ${person.totalVisits} previous visit(s)`;
-    }
-    
-    return 'No previous visits';
   };
 
   // Render different content based on person type
@@ -826,20 +721,13 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
             </div>
             <h4 className="mb-1">{displayName}</h4>
             <div>
-              <Badge bg={getStatusVariant(scannedPerson.status)} className="fs-6 me-2">
-                {scannedPerson.status?.toUpperCase()}
-              </Badge>
+              {/* REMOVED: Status badge (approved/rejected) */}
               <Badge bg={isGuest ? 'info' : 'primary'} className="fs-6">
                 {isGuest ? 'GUEST' : 'VISITOR'}
               </Badge>
             </div>
             <div className="mt-2">
               <small className="text-muted">ID: {scannedPerson.id}</small>
-              {scannedPerson.totalVisits > 0 && (
-                <small className="text-muted d-block">
-                  Total Visits: <Badge bg="secondary">{scannedPerson.totalVisits}</Badge>
-                </small>
-              )}
             </div>
           </Col>
         </Row>
@@ -853,7 +741,7 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
               <Card.Body>
                 <Row>
                   <Col md={6}>
-                    <p><strong>Last Visit Date:</strong> {formatLastVisitDisplay(scannedPerson)}</p>
+                    <p><strong>Last Visit Date:</strong> {scannedPerson.lastVisitDate ? new Date(scannedPerson.lastVisitDate).toLocaleDateString() : 'No previous visits'}</p>
                     <p><strong>Time In:</strong> {scannedPerson.timeIn ? <Badge bg="success" className="fs-6">{formatTimeDisplay(scannedPerson.timeIn)}</Badge> : 'Not recorded'}</p>
                     <p><strong>Date Visited:</strong> {scannedPerson.dateVisited ? new Date(scannedPerson.dateVisited).toLocaleDateString() : 'N/A'}</p>
                   </Col>
@@ -865,17 +753,6 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
                     )}
                   </Col>
                 </Row>
-                {scannedPerson.visitHistory && scannedPerson.visitHistory.length > 0 && (
-                  <Row className="mt-3">
-                    <Col>
-                      <small className="text-muted">
-                        📊 Visit History: {scannedPerson.visitHistory.length} recorded visits
-                        {scannedPerson.totalVisits > scannedPerson.visitHistory.length && 
-                          ` (${scannedPerson.totalVisits} total)`}
-                      </small>
-                    </Col>
-                  </Row>
-                )}
               </Card.Body>
             </Card>
           </Col>
@@ -905,13 +782,13 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
                 {isGuest ? (
                   <>
                     <p><strong>Visit Purpose:</strong> {scannedPerson.visitPurpose}</p>
-                    <p><strong>Created At:</strong> {scannedPerson.createdAt ? new Date(scannedPerson.createdAt).toLocaleString() : 'N/A'}</p>
+                    {/* REMOVED: Created At field */}
                   </>
                 ) : (
                   <>
                     <p><strong>Prisoner ID:</strong> {scannedPerson.prisonerId}</p>
                     <p><strong>Relationship:</strong> {scannedPerson.relationship}</p>
-                    <p><strong>Visit Approved:</strong> {scannedPerson.visitApproved ? 'Yes' : 'No'}</p>
+                    {/* REMOVED: Visit Approved field */}
                   </>
                 )}
               </Card.Body>
@@ -985,8 +862,7 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
                     border: scanSuccess ? '3px solid #28a745' : '2px solid #dee2e6',
                     borderRadius: '8px',
                     backgroundColor: '#000',
-                    transform: 'scaleX(1)',
-                    WebkitTransform: 'scaleX(1)',
+                    // Transform is now handled dynamically in initializeScanner
                   }}
                 ></video>
                 

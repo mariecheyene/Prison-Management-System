@@ -10,6 +10,8 @@ import {
   Search, 
   Plus, 
   Eye, 
+  Edit2, 
+  Trash2, 
   Download,
   Upload,
   Printer,
@@ -19,14 +21,16 @@ import {
   Calendar
 } from 'react-feather';
 
-const ViewVisitors = () => {
+const VisitorFemaleDivision = () => {
   const [visitors, setVisitors] = useState([]);
   const [filteredVisitors, setFilteredVisitors] = useState([]);
   const [inmates, setInmates] = useState([]);
+  const [femaleInmates, setFemaleInmates] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
+  const [editingVisitor, setEditingVisitor] = useState(null);
   const [selectedVisitor, setSelectedVisitor] = useState(null);
   const [selectedQRVisitor, setSelectedQRVisitor] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -53,23 +57,13 @@ const ViewVisitors = () => {
 
   useEffect(() => {
     filterVisitors();
-  }, [searchQuery, searchBy, visitors]);
+  }, [searchQuery, searchBy, visitors, femaleInmates]);
 
   const fetchVisitors = async () => {
     setIsLoading(true);
     try {
       const response = await axios.get("http://localhost:5000/visitors");
-      // Sort visitors alphabetically by last name, then first name
-      const sortedVisitors = response.data.sort((a, b) => {
-        // Compare last names first
-        const lastNameCompare = a.lastName.localeCompare(b.lastName);
-        if (lastNameCompare !== 0) {
-          return lastNameCompare;
-        }
-        // If last names are the same, compare first names
-        return a.firstName.localeCompare(b.firstName);
-      });
-      setVisitors(sortedVisitors);
+      setVisitors(response.data);
     } catch (error) {
       console.error("Error fetching visitors:", error);
       toast.error("Failed to fetch visitors");
@@ -82,6 +76,11 @@ const ViewVisitors = () => {
     try {
       const response = await axios.get("http://localhost:5000/inmates");
       setInmates(response.data);
+      // Filter only female inmates for suggestions
+      const femaleInmates = response.data.filter(inmate => 
+        inmate.sex?.toLowerCase() === 'female'
+      );
+      setFemaleInmates(femaleInmates);
     } catch (error) {
       console.error('Error fetching inmates:', error);
       toast.error('Failed to fetch inmates');
@@ -89,15 +88,32 @@ const ViewVisitors = () => {
   };
 
   const filterVisitors = () => {
-    if (!searchQuery.trim()) {
-      setFilteredVisitors(visitors);
-      return;
+    let filtered = visitors;
+
+    // FIRST: Filter visitors to only show those connected to female inmates
+    if (femaleInmates.length > 0) {
+      const femaleInmateCodes = femaleInmates.map(inmate => inmate.inmateCode);
+      filtered = filtered.filter(visitor => 
+        femaleInmateCodes.includes(visitor.prisonerId)
+      );
     }
 
-    const filtered = visitors.filter(visitor => {
+    // SECOND: Apply search filter if there's a search query
+    if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      const value = visitor[searchBy]?.toString().toLowerCase() || '';
-      return value.includes(query);
+      filtered = filtered.filter(visitor => {
+        const value = visitor[searchBy]?.toString().toLowerCase() || '';
+        return value.includes(query);
+      });
+    }
+    
+    // THIRD: Sort alphabetically by last name, then first name
+    filtered = filtered.sort((a, b) => {
+      const lastNameCompare = a.lastName.localeCompare(b.lastName);
+      if (lastNameCompare !== 0) {
+        return lastNameCompare;
+      }
+      return a.firstName.localeCompare(b.firstName);
     });
     
     setFilteredVisitors(filtered);
@@ -107,9 +123,9 @@ const ViewVisitors = () => {
     const value = e.target.value;
     setPrisonerIdInput(value);
     
-    // Filter suggestions based on input
+    // Filter suggestions based on input - ONLY FEMALE INMATES
     if (value.trim()) {
-      const filtered = inmates.filter(inmate => 
+      const filtered = femaleInmates.filter(inmate => 
         inmate.inmateCode.toLowerCase().includes(value.toLowerCase()) ||
         inmate.fullName.toLowerCase().includes(value.toLowerCase())
       ).slice(0, 5); // Show only top 5 suggestions
@@ -134,6 +150,7 @@ const ViewVisitors = () => {
   };
 
   const handleAdd = () => {
+    setEditingVisitor(null);
     setPrisonerIdInput('');
     setPrisonerIdSuggestions([]);
     const initialData = {
@@ -155,6 +172,18 @@ const ViewVisitors = () => {
     setShowModal(true);
   };
 
+  const handleEdit = (visitor) => {
+    setEditingVisitor(visitor);
+    setPrisonerIdInput(visitor.prisonerId);
+    setPrisonerIdSuggestions([]);
+    const formattedVisitor = {
+      ...visitor,
+      dateOfBirth: visitor.dateOfBirth ? visitor.dateOfBirth.split('T')[0] : ''
+    };
+    setFormData(formattedVisitor);
+    setShowModal(true);
+  };
+
   const handleView = (visitor) => {
     setSelectedVisitor(visitor);
     setShowViewModal(true);
@@ -163,6 +192,24 @@ const ViewVisitors = () => {
   const handleShowQR = async (visitor) => {
     setSelectedQRVisitor(visitor);
     setShowQRModal(true);
+  };
+
+  const handleDelete = async (visitorId) => {
+    if (!window.confirm('Are you sure you want to delete this visitor?')) {
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      await axios.delete(`http://localhost:5000/visitors/${visitorId}`);
+      toast.success('Visitor deleted successfully!');
+      fetchVisitors();
+    } catch (error) {
+      console.error('Error deleting visitor:', error);
+      toast.error('Failed to delete visitor');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const [formData, setFormData] = useState({
@@ -206,64 +253,82 @@ const ViewVisitors = () => {
   };
 
   const handleSubmit = async (e) => {
-  e.preventDefault();
-  setIsLoading(true);
+    e.preventDefault();
+    setIsLoading(true);
 
-  // Validate required fields
-  if (!formData.lastName || !formData.firstName || !formData.sex || !formData.dateOfBirth || 
-      !formData.address || !formData.contact || !formData.prisonerId || !formData.relationship) {
-    toast.error('Please fill in all required fields');
-    setIsLoading(false);
-    return;
-  }
-
-  try {
-    const submitData = new FormData();
-    
-    // Format data properly
-    const formattedData = {
-      ...formData,
-      middleName: formData.middleName || '',
-      extension: formData.extension || '',
-      age: formData.age || '',
-      status: 'pending' // Now goes to pending first
-    };
-
-    // Append all form data
-    Object.keys(formattedData).forEach(key => {
-      if (formattedData[key] !== null && formattedData[key] !== undefined) {
-        submitData.append(key, formattedData[key]);
-      }
-    });
-
-    // Append image file
-    if (imageFile) {
-      submitData.append('photo', imageFile);
+    // Validate required fields
+    if (!formData.lastName || !formData.firstName || !formData.sex || !formData.dateOfBirth || 
+        !formData.address || !formData.contact || !formData.prisonerId || !formData.relationship) {
+      toast.error('Please fill in all required fields');
+      setIsLoading(false);
+      return;
     }
 
-    // Send to pending-visitors endpoint instead of visitors
-    const response = await axios.post("http://localhost:5000/pending-visitors", submitData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
+    // Validate that prisoner ID belongs to a female inmate
+    const selectedInmate = femaleInmates.find(inmate => inmate.inmateCode === formData.prisonerId);
+    if (!selectedInmate) {
+      toast.error('Please select a valid female inmate from the suggestions');
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const submitData = new FormData();
+      
+      // Format data properly
+      const formattedData = {
+        ...formData,
+        middleName: formData.middleName || '',
+        extension: formData.extension || '',
+        age: formData.age || '',
+        status: 'approved' // Always approved for admin
+      };
+
+      // Append all form data
+      Object.keys(formattedData).forEach(key => {
+        if (formattedData[key] !== null && formattedData[key] !== undefined) {
+          submitData.append(key, formattedData[key]);
+        }
+      });
+
+      // Append image file
+      if (imageFile) {
+        submitData.append('photo', imageFile);
       }
-    });
-    
-    toast.success('Visitor request submitted for approval!');
-    setShowModal(false);
-    resetForm();
-  } catch (error) {
-    console.error('Error submitting visitor:', error);
-    console.error('Error response:', error.response?.data);
-    
-    const errorMessage = error.response?.data?.message || 
-                      error.response?.data?.error || 
-                      'Failed to create visitor request';
-    
-    toast.error(errorMessage);
-  } finally {
-    setIsLoading(false);
-  }
-};
+
+      let response;
+      if (editingVisitor) {
+        response = await axios.put(`http://localhost:5000/visitors/${editingVisitor.id}`, submitData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+        toast.success('Visitor updated successfully!');
+      } else {
+        response = await axios.post("http://localhost:5000/visitors", submitData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+        toast.success('Visitor created successfully! QR code has been generated.');
+      }
+      
+      setShowModal(false);
+      resetForm();
+      fetchVisitors();
+    } catch (error) {
+      console.error('Error submitting visitor:', error);
+      console.error('Error response:', error.response?.data);
+      
+      const errorMessage = error.response?.data?.message || 
+                        error.response?.data?.error || 
+                        `Failed to ${editingVisitor ? 'update' : 'create'} visitor`;
+      
+      toast.error(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleFileUpload = (e) => {
     setCsvFile(e.target.files[0]);
@@ -288,7 +353,7 @@ const ViewVisitors = () => {
       toast.success(response.data.message);
       setShowUploadModal(false);
       setCsvFile(null);
-      fetchVisitors(); // This will re-fetch and re-sort the visitors
+      fetchVisitors();
     } catch (error) {
       console.error('Error uploading CSV:', error);
       toast.error(error.response?.data?.message || 'Failed to upload CSV');
@@ -305,7 +370,7 @@ const ViewVisitors = () => {
       'Violation Type', 'Violation Details'
     ];
 
-    const csvData = visitors.map(visitor => [
+    const csvData = filteredVisitors.map(visitor => [
       visitor.id,
       visitor.lastName,
       visitor.firstName,
@@ -334,11 +399,11 @@ const ViewVisitors = () => {
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `visitors_${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `female_division_visitors_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
     window.URL.revokeObjectURL(url);
     
-    toast.success(`Exported ${visitors.length} visitors to CSV`);
+    toast.success(`Exported ${filteredVisitors.length} female division visitors to CSV`);
   };
 
   const downloadQRCode = () => {
@@ -431,6 +496,11 @@ const ViewVisitors = () => {
       console.error('Error formatting date:', error);
       return 'No visits';
     }
+  };
+
+  const formatTime = (timeString) => {
+    if (!timeString) return 'Not recorded';
+    return timeString;
   };
 
   const printVisitorDetails = () => {
@@ -565,7 +635,7 @@ const ViewVisitors = () => {
       </head>
       <body>
         <div class="header">
-          <h1>LANAO DEL NORTE DISTRICT JAIL</h1>
+          <h1>LANAO DEL NORTE DISTRICT JAIL - FEMALE DIVISION</h1>
           <h2>Region 10</h2>
           <h3>VISITOR DETAILS RECORD - ID: ${selectedVisitor?.id}</h3>
         </div>
@@ -691,10 +761,10 @@ const ViewVisitors = () => {
       <div className="d-flex justify-content-between align-items-center mb-4">
         <div>
           <h2 style={{ fontFamily: "Poppins, sans-serif", fontWeight: "600", color: "#2c3e50" }}>
-            👥 Visitors Management
+            👥 Female Division Visitors Management
           </h2>
-          <Badge bg="info" className="mb-2">
-            Staff Access
+          <Badge bg="danger" className="mb-2">
+            Female Division Access Only
           </Badge>
         </div>
         <div className="d-flex gap-2">
@@ -702,9 +772,13 @@ const ViewVisitors = () => {
             <Download size={16} className="me-1" />
             Export CSV
           </Button>
+          <Button variant="outline-dark" size="sm" onClick={() => setShowUploadModal(true)}>
+            <Upload size={16} className="me-1" />
+            Import CSV
+          </Button>
           <Button variant="dark" onClick={handleAdd}>
             <Plus size={16} className="me-1" />
-            Request New Visitor
+            Add Visitor
           </Button>
         </div>
       </div>
@@ -720,7 +794,7 @@ const ViewVisitors = () => {
                 </InputGroup.Text>
                 <Form.Control
                   type="text"
-                  placeholder="Search visitors..."
+                  placeholder="Search female division visitors..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="border-start-0"
@@ -741,7 +815,7 @@ const ViewVisitors = () => {
             </Col>
             <Col md={4}>
               <div className="text-muted small">
-                {filteredVisitors.length} visitors found
+                {filteredVisitors.length} visitors found (Female Division)
               </div>
             </Col>
           </Row>
@@ -756,85 +830,107 @@ const ViewVisitors = () => {
         </div>
       ) : filteredVisitors.length === 0 ? (
         <Alert variant="info">
-          {searchQuery ? 'No visitors found matching your search.' : 'No visitors found. Add your first visitor to get started.'}
+          {searchQuery ? 'No female division visitors found matching your search.' : 'No female division visitors found. Add your first visitor to get started.'}
         </Alert>
       ) : (
         <Table striped bordered hover responsive className="bg-white">
-          <thead className="table-dark">
-            <tr>
-              <th>Visitor ID</th>
-              <th>Full Name</th>
-              <th>Gender</th>
-              <th>Prisoner ID</th>
-              <th>Relationship</th>
-              <th>Last Visit Date</th>
-              <th>Time Status</th>
-              <th>Violation Type</th>
-              <th style={{ width: '80px' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredVisitors.map(visitor => (
-              <tr key={visitor._id}>
-                <td><strong>{visitor.id}</strong></td>
-                <td>{visitor.fullName}</td>
-                <td>{visitor.sex}</td>
-                <td>{visitor.prisonerId}</td>
-                <td>{visitor.relationship}</td>
-                <td>
-                  {visitor.dateVisited ? (
-                    <Badge bg="info">
-                      {formatDate(visitor.dateVisited)}
-                    </Badge>
-                  ) : (
-                    <Badge bg="secondary">Not visited</Badge>
-                  )}
-                </td>
-                <td>
-                  <Badge bg={getTimeStatus(visitor).variant}>
-                    {getTimeStatus(visitor).text}
-                  </Badge>
-                </td>
-                <td>
-                  <Badge bg={getViolationVariant(visitor)}>
-                    {getViolationText(visitor)}
-                  </Badge>
-                </td>
-                <td>
-                  <div className="d-flex gap-1">
-                    <Button 
-                      variant="outline-primary" 
-                      size="sm" 
-                      onClick={() => handleShowQR(visitor)}
-                      className="p-1"
-                      title="QR Code"
-                    >
-                      <Grid size={14} />
-                    </Button>
-                    <Button 
-                      variant="outline-info" 
-                      size="sm" 
-                      onClick={() => handleView(visitor)}
-                      className="p-1"
-                      title="View Details"
-                    >
-                      <Eye size={14} />
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+  <thead className="table-dark">
+    <tr>
+      <th>Visitor ID</th>
+      <th>Full Name</th>
+      <th>Gender</th>
+      <th>Prisoner ID</th>
+      <th>Relationship</th>
+      <th>Last Visit Date</th>
+      <th>Time Status</th>
+      <th>Violation Type</th>
+      <th style={{ width: '120px' }}>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {filteredVisitors.map(visitor => (
+      <tr key={visitor._id}>
+        <td><strong>{visitor.id}</strong></td>
+        <td>{visitor.fullName}</td>
+        <td>{visitor.sex}</td>
+        <td>{visitor.prisonerId}</td>
+        <td>{visitor.relationship}</td>
+        <td>
+          {visitor.dateVisited ? (
+            <Badge bg="info">
+              {formatDate(visitor.dateVisited)}
+            </Badge>
+          ) : (
+            <Badge bg="secondary">Not visited</Badge>
+          )}
+        </td>
+        <td>
+          <Badge bg={getTimeStatus(visitor).variant}>
+            {getTimeStatus(visitor).text}
+          </Badge>
+        </td>
+        <td>
+          <Badge bg={getViolationVariant(visitor)}>
+            {getViolationText(visitor)}
+          </Badge>
+        </td>
+        <td>
+          <div className="d-flex gap-1">
+            <Button 
+              variant="outline-primary" 
+              size="sm" 
+              onClick={() => handleShowQR(visitor)}
+              className="p-1"
+              title="QR Code"
+            >
+              <Grid size={14} />
+            </Button>
+            <Button 
+              variant="outline-info" 
+              size="sm" 
+              onClick={() => handleView(visitor)}
+              className="p-1"
+              title="View Details"
+            >
+              <Eye size={14} />
+            </Button>
+            <Button 
+              variant="outline-warning" 
+              size="sm" 
+              onClick={() => handleEdit(visitor)}
+              className="p-1"
+              title="Edit Visitor"
+            >
+              <Edit2 size={14} />
+            </Button>
+            <Button 
+              variant="outline-danger" 
+              size="sm" 
+              onClick={() => handleDelete(visitor.id)}
+              className="p-1"
+              title="Delete Visitor"
+            >
+              <Trash2 size={14} />
+            </Button>
+          </div>
+        </td>
+      </tr>
+    ))}
+  </tbody>
+</Table>
       )}
 
-      {/* Add Modal */}
+      {/* Add/Edit Modal */}
       <Modal show={showModal} onHide={() => setShowModal(false)} size="lg">
         <Modal.Header closeButton>
-          <Modal.Title>Add New Visitor</Modal.Title>
+          <Modal.Title>{editingVisitor ? 'Edit Visitor' : 'Add New Visitor - Female Division'}</Modal.Title>
         </Modal.Header>
         <Form onSubmit={handleSubmit}>
           <Modal.Body style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+            <Alert variant="info" className="mb-3">
+              <strong>Female Division:</strong> Visitors can only be connected to female inmates.
+            </Alert>
+            
             <Row>
               <Col md={6}>
                 <Form.Group className="mb-3">
@@ -971,8 +1067,11 @@ const ViewVisitors = () => {
                     value={prisonerIdInput}
                     onChange={handlePrisonerIdChange}
                     required
-                    placeholder="Enter prisoner ID"
+                    placeholder="Enter female prisoner ID"
                   />
+                  <Form.Text className="text-muted">
+                    Only female inmates available for selection
+                  </Form.Text>
                   {prisonerIdSuggestions.length > 0 && (
                     <div className="border mt-1" style={{ maxHeight: '150px', overflowY: 'auto' }}>
                       {prisonerIdSuggestions.map(inmate => (
@@ -982,7 +1081,7 @@ const ViewVisitors = () => {
                           style={{ cursor: 'pointer' }}
                           onClick={() => selectPrisonerSuggestion(inmate)}
                         >
-                          <strong>{inmate.inmateCode}</strong> - {inmate.fullName}
+                          <strong>{inmate.inmateCode}</strong> - {inmate.fullName} (Female)
                         </div>
                       ))}
                     </div>
@@ -1019,7 +1118,7 @@ const ViewVisitors = () => {
             <Alert variant="info" className="mt-3">
               <strong>Note:</strong> All visitors added by admin are automatically approved.
               A unique QR code will be generated for time-in/time-out tracking.
-              Violations can be added later in the violations management section.
+              Visitors can only be connected to female inmates in this division.
             </Alert>
           </Modal.Body>
           <Modal.Footer>
@@ -1027,7 +1126,7 @@ const ViewVisitors = () => {
               Cancel
             </Button>
             <Button variant="dark" type="submit" disabled={isLoading}>
-              {isLoading ? <Spinner size="sm" /> : 'Add Visitor'}
+              {isLoading ? <Spinner size="sm" /> : (editingVisitor ? 'Update' : 'Add') + ' Visitor'}
             </Button>
           </Modal.Footer>
         </Form>
@@ -1194,7 +1293,7 @@ const ViewVisitors = () => {
       {/* CSV Upload Modal */}
       <Modal show={showUploadModal} onHide={() => setShowUploadModal(false)}>
         <Modal.Header closeButton>
-          <Modal.Title>Import Visitors from CSV</Modal.Title>
+          <Modal.Title>Import Visitors from CSV - Female Division</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <Form.Group>
@@ -1206,6 +1305,8 @@ const ViewVisitors = () => {
             />
             <Form.Text className="text-muted">
               CSV should include columns: lastName, firstName, middleName, extension, dateOfBirth, sex, address, contact, prisonerId, relationship
+              <br />
+              <strong>Note:</strong> Only female inmates are available in this division.
             </Form.Text>
           </Form.Group>
         </Modal.Body>
@@ -1222,4 +1323,4 @@ const ViewVisitors = () => {
   );
 };
 
-export default ViewVisitors;
+export default VisitorFemaleDivision;

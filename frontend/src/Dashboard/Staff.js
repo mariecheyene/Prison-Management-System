@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { NavLink, Routes, Route, useLocation, Navigate } from "react-router-dom";
-import "./css/Sidebar.css";
+import "./css/Style.css";
 import "boxicons/css/boxicons.min.css";
 import "bootstrap/dist/css/bootstrap.min.css";
 import DashboardHome from "./Components/Dashboard";
@@ -116,7 +116,8 @@ const Staff = () => {
       </div>
 
       <div className="content">
-        <nav>
+        {/* ADD fixed-nav CLASS HERE */}
+        <nav className="fixed-nav">
           <i 
             className="bx bx-menu toggle-sidebar" 
             onClick={() => setIsSidebarClosed(!isSidebarClosed)}
@@ -136,10 +137,10 @@ const Staff = () => {
             size="sm"
           >
             <svg className="me-1" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M3 11h8V3H3v8zm2-6h4v4H5V5zM3 21h8v-8H3v8zm2-6h4v4H5v-4zm8-12v8h8V3h-8zm6 6h-4V5h4v4z"/>
-    <path d="M19 19h2v2h-2zM15 15h2v2h-2zM15 19h2v2h-2zM11 11h2v2h-2zM7 15h2v2H7zM11 15h2v2h-2zM11 19h2v2h-2z"/>
-  </svg>
-  Scan QR
+              <path d="M3 11h8V3H3v8zm2-6h4v4H5V5zM3 21h8v-8H3v8zm2-6h4v4H5v-4zm8-12v8h8V3h-8zm6 6h-4V5h4v4z"/>
+              <path d="M19 19h2v2h-2zM15 15h2v2h-2zM15 19h2v2h-2zM11 11h2v2h-2zM7 15h2v2H7zM11 15h2v2h-2zM11 19h2v2h-2z"/>
+            </svg>
+            Scan QR
           </Button>
           
           <Dropdown className="profile-dropdown">
@@ -170,7 +171,8 @@ const Staff = () => {
           </Dropdown>
         </nav>
 
-        <main>
+        {/* ADD main-content CLASS HERE */}
+        <main className="main-content">
           <Routes>
             <Route path="/" element={<Navigate to="/staff/dashboard" />} />
             <Route path="/dashboard" element={<DashboardHome />} />

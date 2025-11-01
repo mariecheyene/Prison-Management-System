@@ -75,7 +75,7 @@ const MaleStaff = () => {
   return (
       <div className="dashboard">
         <div className={`sidebar ${isSidebarClosed ? "close" : ""}`}>
-          <NavLink to="/admin/dashboard" className="logo">
+          <NavLink to="/malestaff/dashboard" className="logo">
             <div className="logo-content">
               <div className="logo-img">
                 <img src="/img/logo.jpg" alt="LANAO DEL NORTE DISTRICT JAIL REGION 10 Logo" />
@@ -116,7 +116,8 @@ const MaleStaff = () => {
       </div>
 
       <div className="content">
-        <nav>
+        {/* FIXED: Added fixed-nav class */}
+        <nav className="fixed-nav">
           <i 
             className="bx bx-menu toggle-sidebar" 
             onClick={() => setIsSidebarClosed(!isSidebarClosed)}
@@ -170,7 +171,8 @@ const MaleStaff = () => {
           </Dropdown>
         </nav>
 
-        <main>
+        {/* FIXED: Added main-content class */}
+        <main className="main-content">
           <Routes>
             <Route path="/" element={<Navigate to="/malestaff/dashboard" />} />
             <Route path="/dashboard" element={<DashboardHome />} />

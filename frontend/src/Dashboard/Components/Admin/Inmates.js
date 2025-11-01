@@ -56,6 +56,30 @@ const Inmates = ({ gender = 'all' }) => {
     { value: 'status', label: 'Status' }
   ];
 
+  // Calculate sentence duration from dates
+  const calculateSentenceDuration = (dateFrom, dateTo) => {
+    if (!dateFrom || !dateTo) return '';
+    
+    const from = new Date(dateFrom);
+    const to = new Date(dateTo);
+    
+    // Check if dateTo is after dateFrom
+    if (to <= from) return 'Invalid dates';
+    
+    const diffTime = Math.abs(to - from);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const diffYears = Math.floor(diffDays / 365);
+    const diffMonths = Math.floor((diffDays % 365) / 30);
+    const remainingDays = diffDays % 30;
+
+    let sentenceParts = [];
+    if (diffYears > 0) sentenceParts.push(`${diffYears} year${diffYears > 1 ? 's' : ''}`);
+    if (diffMonths > 0) sentenceParts.push(`${diffMonths} month${diffMonths > 1 ? 's' : ''}`);
+    if (remainingDays > 0) sentenceParts.push(`${remainingDays} day${remainingDays > 1 ? 's' : ''}`);
+    
+    return sentenceParts.length > 0 ? `${sentenceParts.join(' ')} imprisonment` : '';
+  };
+
   useEffect(() => {
     fetchInmates();
     fetchCrimes();
@@ -224,6 +248,22 @@ const Inmates = ({ gender = 'all' }) => {
       ...prev,
       [name]: value
     }));
+
+    // Auto-calculate sentence when dateFrom or dateTo changes
+    if (name === 'dateFrom' || name === 'dateTo') {
+      const dateFrom = name === 'dateFrom' ? value : formData.dateFrom;
+      const dateTo = name === 'dateTo' ? value : formData.dateTo;
+      
+      if (dateFrom && dateTo) {
+        const calculatedSentence = calculateSentenceDuration(dateFrom, dateTo);
+        if (calculatedSentence && calculatedSentence !== 'Invalid dates') {
+          setFormData(prev => ({
+            ...prev,
+            sentence: calculatedSentence
+          }));
+        }
+      }
+    }
   };
 
   const handleCrimeSearchChange = (e) => {
@@ -271,6 +311,17 @@ const Inmates = ({ gender = 'all' }) => {
       toast.error('Please fill in all required fields');
       setIsLoading(false);
       return;
+    }
+
+    // Validate dates
+    if (formData.dateFrom && formData.dateTo) {
+      const from = new Date(formData.dateFrom);
+      const to = new Date(formData.dateTo);
+      if (to <= from) {
+        toast.error('Date To must be after Date From');
+        setIsLoading(false);
+        return;
+      }
     }
 
     try {
@@ -350,32 +401,55 @@ const Inmates = ({ gender = 'all' }) => {
   };
 
   const handleCsvUpload = async () => {
-    if (!csvFile) {
-      toast.error('Please select a CSV file');
-      return;
+  if (!csvFile) {
+    toast.error('Please select a CSV file');
+    return;
+  }
+
+  setIsLoading(true);
+  const formData = new FormData();
+  formData.append('csvFile', csvFile);
+
+  try {
+    const response = await axios.post('http://localhost:5000/inmates/upload-csv', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    });
+    
+    console.log('📊 Import response:', response.data);
+    
+    if (response.data.imported > 0) {
+      toast.success(`Successfully imported ${response.data.imported} inmates`);
+    } else {
+      toast.warning(`No inmates imported. ${response.data.errors?.length || 0} errors found.`);
     }
-
-    setIsLoading(true);
-    const formData = new FormData();
-    formData.append('csvFile', csvFile);
-
-    try {
-      const response = await axios.post('http://localhost:5000/inmates/upload-csv', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
+    
+    // Show detailed errors if any
+    if (response.data.errors && response.data.errors.length > 0) {
+      console.error('Import errors:', response.data.errors);
+      // You can show these errors to the user in a more detailed way
+      response.data.errors.forEach((error, index) => {
+        if (index < 5) { // Show first 5 errors to avoid spam
+          toast.error(`Row ${error.row}: ${error.error}`);
         }
       });
-      toast.success(response.data.message);
-      setShowUploadModal(false);
-      setCsvFile(null);
-      fetchInmates();
-    } catch (error) {
-      console.error('Error uploading CSV:', error);
-      toast.error(error.response?.data?.message || 'Failed to upload CSV');
-    } finally {
-      setIsLoading(false);
+      if (response.data.errors.length > 5) {
+        toast.error(`... and ${response.data.errors.length - 5} more errors`);
+      }
     }
-  };
+    
+    setShowUploadModal(false);
+    setCsvFile(null);
+    fetchInmates(); // Refresh the inmate list
+  } catch (error) {
+    console.error('❌ Error uploading CSV:', error);
+    console.error('Error response:', error.response?.data);
+    toast.error(error.response?.data?.message || 'Failed to upload CSV');
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const exportToCSV = () => {
     const headers = [
@@ -505,192 +579,192 @@ const Inmates = ({ gender = 'all' }) => {
   };
 
   const printInmateDetails = () => {
-  const printWindow = window.open('', '_blank');
-  const images = getAvailableImages(selectedInmate);
-  
-  const imageHTML = images.length > 0 ? `
-    <div class="section">
-      <h3>Inmate Photos</h3>
-      <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 15px;">
-        ${images.map(img => `
-          <div style="text-align: center; flex: 1; min-width: 200px;">
-            <div style="font-weight: bold; margin-bottom: 5px;">${img.type}</div>
-            <img 
-              src="http://localhost:5000/uploads/${img.src}" 
-              alt="${img.type}" 
-              style="max-width: 100%; height: 150px; object-fit: cover; border: 1px solid #ddd;"
-              onload="window.print()"
-            />
-          </div>
-        `).join('')}
-      </div>
-    </div>
-  ` : '';
-
-  printWindow.document.write(`
-    <html>
-      <head>
-        <title>Inmate Details - ${selectedInmate?.inmateCode}</title>
-        <style>
-          body { 
-            font-family: Arial, sans-serif; 
-            margin: 20px; 
-            line-height: 1.4;
-            color: #333;
-          }
-          .header { 
-            text-align: center; 
-            margin-bottom: 30px; 
-            border-bottom: 3px solid #333; 
-            padding-bottom: 15px; 
-          }
-          .header h1 {
-            margin: 0;
-            font-size: 24px;
-            font-weight: bold;
-            color: #2c3e50;
-          }
-          .header h2 {
-            margin: 5px 0 0 0;
-            font-size: 18px;
-            font-weight: normal;
-            color: #2c3e50;
-          }
-          .header h3 {
-            margin: 10px 0 0 0;
-            font-size: 16px;
-            font-weight: bold;
-            color: #2c3e50;
-          }
-          .section { 
-            margin-bottom: 25px; 
-            padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-          }
-          .section h3 {
-            margin-top: 0;
-            color: #2c3e50;
-            border-bottom: 1px solid #eee;
-            padding-bottom: 8px;
-          }
-          .info-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-          }
-          .info-item {
-            margin-bottom: 10px;
-          }
-          .label { 
-            font-weight: bold; 
-            color: #2c3e50;
-            display: inline-block;
-            width: 140px;
-          }
-          .full-width {
-            grid-column: 1 / -1;
-          }
-          @media print {
-            body { margin: 10px; }
-            .section { border: none; }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>LANAO DEL NORTE DISTRICT JAIL</h1>
-          <h2>Region 10</h2>
-          <h3>INMATE DETAILS RECORD - ID: ${selectedInmate?.inmateCode}</h3>
+    const printWindow = window.open('', '_blank');
+    const images = getAvailableImages(selectedInmate);
+    
+    const imageHTML = images.length > 0 ? `
+      <div class="section">
+        <h3>Inmate Photos</h3>
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 15px;">
+          ${images.map(img => `
+            <div style="text-align: center; flex: 1; min-width: 200px;">
+              <div style="font-weight: bold; margin-bottom: 5px;">${img.type}</div>
+              <img 
+                src="http://localhost:5000/uploads/${img.src}" 
+                alt="${img.type}" 
+                style="max-width: 100%; height: 150px; object-fit: cover; border: 1px solid #ddd;"
+                onload="window.print()"
+              />
+            </div>
+          `).join('')}
         </div>
-        
-        ${selectedInmate ? `
-          ${imageHTML}
+      </div>
+    ` : '';
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Inmate Details - ${selectedInmate?.inmateCode}</title>
+          <style>
+            body { 
+              font-family: Arial, sans-serif; 
+              margin: 20px; 
+              line-height: 1.4;
+              color: #333;
+            }
+            .header { 
+              text-align: center; 
+              margin-bottom: 30px; 
+              border-bottom: 3px solid #333; 
+              padding-bottom: 15px; 
+            }
+            .header h1 {
+              margin: 0;
+              font-size: 24px;
+              font-weight: bold;
+              color: #2c3e50;
+            }
+            .header h2 {
+              margin: 5px 0 0 0;
+              font-size: 18px;
+              font-weight: normal;
+              color: #2c3e50;
+            }
+            .header h3 {
+              margin: 10px 0 0 0;
+              font-size: 16px;
+              font-weight: bold;
+              color: #2c3e50;
+            }
+            .section { 
+              margin-bottom: 25px; 
+              padding: 15px;
+              border: 1px solid #ddd;
+              border-radius: 5px;
+            }
+            .section h3 {
+              margin-top: 0;
+              color: #2c3e50;
+              border-bottom: 1px solid #eee;
+              padding-bottom: 8px;
+            }
+            .info-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 15px;
+            }
+            .info-item {
+              margin-bottom: 10px;
+            }
+            .label { 
+              font-weight: bold; 
+              color: #2c3e50;
+              display: inline-block;
+              width: 140px;
+            }
+            .full-width {
+              grid-column: 1 / -1;
+            }
+            @media print {
+              body { margin: 10px; }
+              .section { border: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>LANAO DEL NORTE DISTRICT JAIL</h1>
+            <h2>Region 10</h2>
+            <h3>INMATE DETAILS RECORD - ID: ${selectedInmate?.inmateCode}</h3>
+          </div>
           
-          <div class="section">
-            <h3>Personal Information</h3>
-            <div class="info-grid">
-              <div class="info-item">
-                <span class="label">Full Name:</span> ${selectedInmate.fullName}
-              </div>
-              <div class="info-item">
-                <span class="label">Gender:</span> ${selectedInmate.sex}
-              </div>
-              <div class="info-item">
-                <span class="label">Date of Birth:</span> ${new Date(selectedInmate.dateOfBirth).toLocaleDateString()}
-              </div>
-              <div class="info-item">
-                <span class="label">Age:</span> ${calculateAge(selectedInmate.dateOfBirth)}
-              </div>
-              <div class="info-item full-width">
-                <span class="label">Address:</span> ${selectedInmate.address}
-              </div>
-              <div class="info-item">
-                <span class="label">Marital Status:</span> ${selectedInmate.maritalStatus || 'N/A'}
-              </div>
-              <div class="info-item">
-                <span class="label">Eye Color:</span> ${selectedInmate.eyeColor || 'N/A'}
-              </div>
-              <div class="info-item">
-                <span class="label">Complexion:</span> ${selectedInmate.complexion || 'N/A'}
+          ${selectedInmate ? `
+            ${imageHTML}
+            
+            <div class="section">
+              <h3>Personal Information</h3>
+              <div class="info-grid">
+                <div class="info-item">
+                  <span class="label">Full Name:</span> ${selectedInmate.fullName}
+                </div>
+                <div class="info-item">
+                  <span class="label">Gender:</span> ${selectedInmate.sex}
+                </div>
+                <div class="info-item">
+                  <span class="label">Date of Birth:</span> ${new Date(selectedInmate.dateOfBirth).toLocaleDateString()}
+                </div>
+                <div class="info-item">
+                  <span class="label">Age:</span> ${calculateAge(selectedInmate.dateOfBirth)}
+                </div>
+                <div class="info-item full-width">
+                  <span class="label">Address:</span> ${selectedInmate.address}
+                </div>
+                <div class="info-item">
+                  <span class="label">Marital Status:</span> ${selectedInmate.maritalStatus || 'N/A'}
+                </div>
+                <div class="info-item">
+                  <span class="label">Eye Color:</span> ${selectedInmate.eyeColor || 'N/A'}
+                </div>
+                <div class="info-item">
+                  <span class="label">Complexion:</span> ${selectedInmate.complexion || 'N/A'}
+                </div>
               </div>
             </div>
-          </div>
 
-          <div class="section">
-            <h3>Legal Details</h3>
-            <div class="info-grid">
-              <div class="info-item">
-                <span class="label">Cell ID:</span> ${selectedInmate.cellId}
-              </div>
-              <div class="info-item">
-                <span class="label">Crime:</span> ${selectedInmate.crime}
-              </div>
-              <div class="info-item">
-                <span class="label">Sentence:</span> ${selectedInmate.sentence || 'N/A'}
-              </div>
-              <div class="info-item">
-                <span class="label">Status:</span> ${selectedInmate.status.toUpperCase()}
-              </div>
-              <div class="info-item">
-                <span class="label">Date From:</span> ${selectedInmate.dateFrom ? new Date(selectedInmate.dateFrom).toLocaleDateString() : 'N/A'}
-              </div>
-              <div class="info-item">
-                <span class="label">Date To:</span> ${selectedInmate.dateTo ? new Date(selectedInmate.dateTo).toLocaleDateString() : 'N/A'}
+            <div class="section">
+              <h3>Legal Details</h3>
+              <div class="info-grid">
+                <div class="info-item">
+                  <span class="label">Cell ID:</span> ${selectedInmate.cellId}
+                </div>
+                <div class="info-item">
+                  <span class="label">Crime:</span> ${selectedInmate.crime}
+                </div>
+                <div class="info-item">
+                  <span class="label">Sentence:</span> ${selectedInmate.sentence || 'N/A'}
+                </div>
+                <div class="info-item">
+                  <span class="label">Status:</span> ${selectedInmate.status.toUpperCase()}
+                </div>
+                <div class="info-item">
+                  <span class="label">Date From:</span> ${selectedInmate.dateFrom ? new Date(selectedInmate.dateFrom).toLocaleDateString() : 'N/A'}
+                </div>
+                <div class="info-item">
+                  <span class="label">Date To:</span> ${selectedInmate.dateTo ? new Date(selectedInmate.dateTo).toLocaleDateString() : 'N/A'}
+                </div>
               </div>
             </div>
-          </div>
 
-          <div class="section">
-            <h3>Emergency Contact</h3>
-            <div class="info-grid">
-              <div class="info-item">
-                <span class="label">Name:</span> ${selectedInmate.emergencyName || 'N/A'}
-              </div>
-              <div class="info-item">
-                <span class="label">Contact:</span> ${selectedInmate.emergencyContact || 'N/A'}
-              </div>
-              <div class="info-item">
-                <span class="label">Relationship:</span> ${selectedInmate.emergencyRelation || 'N/A'}
+            <div class="section">
+              <h3>Emergency Contact</h3>
+              <div class="info-grid">
+                <div class="info-item">
+                  <span class="label">Name:</span> ${selectedInmate.emergencyName || 'N/A'}
+                </div>
+                <div class="info-item">
+                  <span class="label">Contact:</span> ${selectedInmate.emergencyContact || 'N/A'}
+                </div>
+                <div class="info-item">
+                  <span class="label">Relationship:</span> ${selectedInmate.emergencyRelation || 'N/A'}
+                </div>
               </div>
             </div>
-          </div>
 
-          <div class="section">
-            <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
-              <p><strong>Generated on:</strong> ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
-              <p><em>Official Document - Lanao Del Norte District Jail, Region 10</em></p>
+            <div class="section">
+              <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
+                <p><strong>Generated on:</strong> ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
+                <p><em>Official Document - Lanao Del Norte District Jail, Region 10</em></p>
+              </div>
             </div>
-          </div>
-        ` : ''}
-      </body>
-    </html>
-  `);
-  printWindow.document.close();
-  setTimeout(() => {
-    printWindow.print();
-  }, 1000);
-};
+          ` : ''}
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    setTimeout(() => {
+      printWindow.print();
+    }, 1000);
+  };
 
   return (
     <Container>
@@ -1087,7 +1161,14 @@ const Inmates = ({ gender = 'all' }) => {
             <Row>
               <Col md={6}>
                 <Form.Group className="mb-3">
-                  <Form.Label>Sentence</Form.Label>
+                  <Form.Label>
+                    Sentence 
+                    {formData.dateFrom && formData.dateTo && (
+                      <Badge bg="success" className="ms-2" style={{ fontSize: '0.6rem' }}>
+                        Auto-filled
+                      </Badge>
+                    )}
+                  </Form.Label>
                   <Form.Control
                     type="text"
                     name="sentence"
@@ -1095,6 +1176,12 @@ const Inmates = ({ gender = 'all' }) => {
                     onChange={handleInputChange}
                     placeholder="e.g., 5 years imprisonment"
                   />
+                  <Form.Text className="text-muted">
+                    {formData.dateFrom && formData.dateTo 
+                      ? `Auto-calculated: ${calculateSentenceDuration(formData.dateFrom, formData.dateTo)}`
+                      : 'Enter manually or set Date From/To to auto-calculate'
+                    }
+                  </Form.Text>
                 </Form.Group>
               </Col>
               <Col md={6}>
@@ -1114,7 +1201,7 @@ const Inmates = ({ gender = 'all' }) => {
               </Col>
             </Row>
 
-            <Row>
+                        <Row>
               <Col md={6}>
                 <Form.Group className="mb-3">
                   <Form.Label>Date From</Form.Label>
@@ -1135,264 +1222,305 @@ const Inmates = ({ gender = 'all' }) => {
                     value={formData.dateTo}
                     onChange={handleInputChange}
                   />
-                </Form.Group>
+                </Form.Group> {/* ← CORRECTED: Changed from </Form.Text> to </Form.Group> */}
               </Col>
             </Row>
+          {/* Image Upload Section */}
+          <Row>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label>Front Image</Form.Label>
+                <Form.Control
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleImageChange(e, 'frontImage')}
+                />
+                <Form.Text className="text-muted">
+                  Upload front view photo
+                </Form.Text>
+              </Form.Group>
+            </Col>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label>Back Image</Form.Label>
+                <Form.Control
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleImageChange(e, 'backImage')}
+                />
+                <Form.Text className="text-muted">
+                  Upload back view photo
+                </Form.Text>
+              </Form.Group>
+            </Col>
+          </Row>
+          <Row>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label>Left Side Image</Form.Label>
+                <Form.Control
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleImageChange(e, 'leftImage')}
+                />
+                <Form.Text className="text-muted">
+                  Upload left side photo
+                </Form.Text>
+              </Form.Group>
+            </Col>
+            <Col md={6}>
+              <Form.Group className="mb-3">
+                <Form.Label>Right Side Image</Form.Label>
+                <Form.Control
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleImageChange(e, 'rightImage')}
+                />
+                <Form.Text className="text-muted">
+                  Upload right side photo
+                </Form.Text>
+              </Form.Group>
+            </Col>
+          </Row>
 
-            {/* Image Upload Section */}
-            <Row>
-              <Col md={6}>
-                <Form.Group className="mb-3">
-                  <Form.Label>Front Image</Form.Label>
-                  <Form.Control
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => handleImageChange(e, 'frontImage')}
-                  />
-                  <Form.Text className="text-muted">
-                    Upload front view photo
-                  </Form.Text>
-                </Form.Group>
-              </Col>
-              <Col md={6}>
-                <Form.Group className="mb-3">
-                  <Form.Label>Back Image</Form.Label>
-                  <Form.Control
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => handleImageChange(e, 'backImage')}
-                  />
-                  <Form.Text className="text-muted">
-                    Upload back view photo
-                  </Form.Text>
-                </Form.Group>
-              </Col>
-            </Row>
-            <Row>
-              <Col md={6}>
-                <Form.Group className="mb-3">
-                  <Form.Label>Left Side Image</Form.Label>
-                  <Form.Control
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => handleImageChange(e, 'leftImage')}
-                  />
-                  <Form.Text className="text-muted">
-                    Upload left side photo
-                  </Form.Text>
-                </Form.Group>
-              </Col>
-              <Col md={6}>
-                <Form.Group className="mb-3">
-                  <Form.Label>Right Side Image</Form.Label>
-                  <Form.Control
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => handleImageChange(e, 'rightImage')}
-                  />
-                  <Form.Text className="text-muted">
-                    Upload right side photo
-                  </Form.Text>
-                </Form.Group>
-              </Col>
-            </Row>
-
-            <h6>Emergency Contact</h6>
-            <Row>
-              <Col md={4}>
-                <Form.Group className="mb-3">
-                  <Form.Label>Name</Form.Label>
-                  <Form.Control
-                    type="text"
-                    name="emergencyName"
-                    value={formData.emergencyName}
-                    onChange={handleInputChange}
-                    placeholder="Emergency contact name"
-                  />
-                </Form.Group>
-              </Col>
-              <Col md={4}>
-                <Form.Group className="mb-3">
-                  <Form.Label>Contact Number</Form.Label>
-                  <Form.Control
-                    type="text"
-                    name="emergencyContact"
-                    value={formData.emergencyContact}
-                    onChange={handleInputChange}
-                    placeholder="Phone number"
-                  />
-                </Form.Group>
-              </Col>
-              <Col md={4}>
-                <Form.Group className="mb-3">
-                  <Form.Label>Relationship</Form.Label>
-                  <Form.Control
-                    type="text"
-                    name="emergencyRelation"
-                    value={formData.emergencyRelation}
-                    onChange={handleInputChange}
-                    placeholder="e.g., Spouse, Parent, Sibling"
-                  />
-                </Form.Group>
-              </Col>
-            </Row>
-          </Modal.Body>
-          <Modal.Footer>
-            <Button variant="secondary" onClick={() => setShowModal(false)}>
-              Cancel
-            </Button>
-            <Button variant="dark" type="submit" disabled={isLoading}>
-              {isLoading ? <Spinner size="sm" /> : (editingInmate ? 'Update' : 'Add') + ' Inmate'}
-            </Button>
-          </Modal.Footer>
-        </Form>
-      </Modal>
-
-      {/* View Modal with Image Carousel */}
-      <Modal show={showViewModal} onHide={() => setShowViewModal(false)} size="lg">
-        <Modal.Header closeButton>
-          <Modal.Title>Inmate Details - {selectedInmate?.inmateCode}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          {selectedInmate && (
-            <>
-              {/* Image Carousel */}
-              {getAvailableImages(selectedInmate).length > 0 && (
-                <Card className="mb-4">
-                  <Card.Header>
-                    <strong>Inmate Photos</strong>
-                  </Card.Header>
-                  <Card.Body>
-                    <div className="text-center position-relative">
-                      <img 
-                        src={`http://localhost:5000/uploads/${getAvailableImages(selectedInmate)[currentImageIndex].src}`}
-                        alt={getAvailableImages(selectedInmate)[currentImageIndex].type}
-                        style={{ 
-                          maxWidth: '100%', 
-                          maxHeight: '300px', 
-                          objectFit: 'cover',
-                          borderRadius: '5px'
-                        }}
-                      />
-                      {getAvailableImages(selectedInmate).length > 1 && (
-                        <>
-                          <Button
-                            variant="dark"
-                            size="sm"
-                            className="position-absolute top-50 start-0 translate-middle-y"
-                            onClick={prevImage}
-                            style={{ left: '10px' }}
-                          >
-                            <ChevronLeft size={16} />
-                          </Button>
-                          <Button
-                            variant="dark"
-                            size="sm"
-                            className="position-absolute top-50 end-0 translate-middle-y"
-                            onClick={nextImage}
-                            style={{ right: '10px' }}
-                          >
-                            <ChevronRight size={16} />
-                          </Button>
-                        </>
-                      )}
-                      <div className="mt-2">
-                        <Badge bg="dark">
-                          {currentImageIndex + 1} / {getAvailableImages(selectedInmate).length} - 
-                          {getAvailableImages(selectedInmate)[currentImageIndex].type}
-                        </Badge>
-                      </div>
-                    </div>
-                  </Card.Body>
-                </Card>
-              )}
-
-              <Row>
-                <Col md={6}>
-                  <Card className="mb-3">
-                    <Card.Header>
-                      <strong>Personal Information</strong>
-                    </Card.Header>
-                    <Card.Body>
-                      <p><strong>Full Name:</strong> {selectedInmate.fullName}</p>
-                      <p><strong>Gender:</strong> {selectedInmate.sex}</p>
-                      <p><strong>Date of Birth:</strong> {new Date(selectedInmate.dateOfBirth).toLocaleDateString()}</p>
-                      <p><strong>Age:</strong> {calculateAge(selectedInmate.dateOfBirth)}</p>
-                      <p><strong>Address:</strong> {selectedInmate.address}</p>
-                      <p><strong>Marital Status:</strong> {selectedInmate.maritalStatus || 'N/A'}</p>
-                      <p><strong>Eye Color:</strong> {selectedInmate.eyeColor || 'N/A'}</p>
-                      <p><strong>Complexion:</strong> {selectedInmate.complexion || 'N/A'}</p>
-                    </Card.Body>
-                  </Card>
-                </Col>
-                <Col md={6}>
-                  <Card className="mb-3">
-                    <Card.Header>
-                      <strong>Legal Details</strong>
-                    </Card.Header>
-                    <Card.Body>
-                      <p><strong>Cell ID:</strong> {selectedInmate.cellId}</p>
-                      <p><strong>Crime:</strong> {selectedInmate.crime}</p>
-                      <p><strong>Sentence:</strong> {selectedInmate.sentence || 'N/A'}</p>
-                      <p><strong>Status:</strong> <Badge bg={getStatusVariant(selectedInmate.status)}>{selectedInmate.status}</Badge></p>
-                      <p><strong>Date From:</strong> {selectedInmate.dateFrom ? new Date(selectedInmate.dateFrom).toLocaleDateString() : 'N/A'}</p>
-                      <p><strong>Date To:</strong> {selectedInmate.dateTo ? new Date(selectedInmate.dateTo).toLocaleDateString() : 'N/A'}</p>
-                    </Card.Body>
-                  </Card>
-                  <Card>
-                    <Card.Header>
-                      <strong>Emergency Contact</strong>
-                    </Card.Header>
-                    <Card.Body>
-                      <p><strong>Name:</strong> {selectedInmate.emergencyName || 'N/A'}</p>
-                      <p><strong>Contact:</strong> {selectedInmate.emergencyContact || 'N/A'}</p>
-                      <p><strong>Relationship:</strong> {selectedInmate.emergencyRelation || 'N/A'}</p>
-                    </Card.Body>
-                  </Card>
-                </Col>
-              </Row>
-            </>
-          )}
+          <h6>Emergency Contact</h6>
+          <Row>
+            <Col md={4}>
+              <Form.Group className="mb-3">
+                <Form.Label>Name</Form.Label>
+                <Form.Control
+                  type="text"
+                  name="emergencyName"
+                  value={formData.emergencyName}
+                  onChange={handleInputChange}
+                  placeholder="Emergency contact name"
+                />
+              </Form.Group>
+            </Col>
+            <Col md={4}>
+              <Form.Group className="mb-3">
+                <Form.Label>Contact Number</Form.Label>
+                <Form.Control
+                  type="text"
+                  name="emergencyContact"
+                  value={formData.emergencyContact}
+                  onChange={handleInputChange}
+                  placeholder="Phone number"
+                />
+              </Form.Group>
+            </Col>
+            <Col md={4}>
+              <Form.Group className="mb-3">
+                <Form.Label>Relationship</Form.Label>
+                <Form.Control
+                  type="text"
+                  name="emergencyRelation"
+                  value={formData.emergencyRelation}
+                  onChange={handleInputChange}
+                  placeholder="e.g., Spouse, Parent, Sibling"
+                />
+              </Form.Group>
+            </Col>
+          </Row>
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowViewModal(false)}>
-            Close
-          </Button>
-          <Button variant="dark" onClick={printInmateDetails}>
-            <Printer size={16} className="me-1" />
-            Print
-          </Button>
-        </Modal.Footer>
-      </Modal>
-
-      {/* CSV Upload Modal */}
-      <Modal show={showUploadModal} onHide={() => setShowUploadModal(false)}>
-        <Modal.Header closeButton>
-          <Modal.Title>Import Inmates from CSV</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <Form.Group>
-            <Form.Label>Select CSV File</Form.Label>
-            <Form.Control
-              type="file"
-              accept=".csv"
-              onChange={handleFileUpload}
-            />
-            <Form.Text className="text-muted">
-              CSV should include columns: lastName, firstName, middleName, extension, sex, dateOfBirth, address, maritalStatus, eyeColor, complexion, cellId, sentence, dateFrom, dateTo, crime, emergencyName, emergencyContact, emergencyRelation, status
-            </Form.Text>
-          </Form.Group>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowUploadModal(false)}>
+          <Button variant="secondary" onClick={() => setShowModal(false)}>
             Cancel
           </Button>
-          <Button variant="dark" onClick={handleCsvUpload} disabled={!csvFile || isLoading}>
-            {isLoading ? <Spinner size="sm" /> : 'Upload CSV'}
+          <Button variant="dark" type="submit" disabled={isLoading}>
+            {isLoading ? <Spinner size="sm" /> : (editingInmate ? 'Update' : 'Add') + ' Inmate'}
           </Button>
         </Modal.Footer>
-      </Modal>
-    </Container>
+      </Form>
+    </Modal>
+
+    {/* View Modal with Image Carousel */}
+    <Modal show={showViewModal} onHide={() => setShowViewModal(false)} size="lg">
+      <Modal.Header closeButton>
+        <Modal.Title>Inmate Details - {selectedInmate?.inmateCode}</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        {selectedInmate && (
+          <>
+            {/* Image Carousel */}
+            {getAvailableImages(selectedInmate).length > 0 && (
+              <Card className="mb-4">
+                <Card.Header>
+                  <strong>Inmate Photos</strong>
+                </Card.Header>
+                <Card.Body>
+                  <div className="text-center position-relative">
+                    <img 
+                      src={`http://localhost:5000/uploads/${getAvailableImages(selectedInmate)[currentImageIndex].src}`}
+                      alt={getAvailableImages(selectedInmate)[currentImageIndex].type}
+                      style={{ 
+                        maxWidth: '100%', 
+                        maxHeight: '300px', 
+                        objectFit: 'cover',
+                        borderRadius: '5px'
+                      }}
+                    />
+                    {getAvailableImages(selectedInmate).length > 1 && (
+                      <>
+                        <Button
+                          variant="dark"
+                          size="sm"
+                          className="position-absolute top-50 start-0 translate-middle-y"
+                          onClick={prevImage}
+                          style={{ left: '10px' }}
+                        >
+                          <ChevronLeft size={16} />
+                        </Button>
+                        <Button
+                          variant="dark"
+                          size="sm"
+                          className="position-absolute top-50 end-0 translate-middle-y"
+                          onClick={nextImage}
+                          style={{ right: '10px' }}
+                        >
+                          <ChevronRight size={16} />
+                        </Button>
+                      </>
+                    )}
+                    <div className="mt-2">
+                      <Badge bg="dark">
+                        {currentImageIndex + 1} / {getAvailableImages(selectedInmate).length} - 
+                        {getAvailableImages(selectedInmate)[currentImageIndex].type}
+                      </Badge>
+                    </div>
+                  </div>
+                </Card.Body>
+              </Card>
+            )}
+
+            <Row>
+              <Col md={6}>
+                <Card className="mb-3">
+                  <Card.Header>
+                    <strong>Personal Information</strong>
+                  </Card.Header>
+                  <Card.Body>
+                    <p><strong>Full Name:</strong> {selectedInmate.fullName}</p>
+                    <p><strong>Gender:</strong> {selectedInmate.sex}</p>
+                    <p><strong>Date of Birth:</strong> {new Date(selectedInmate.dateOfBirth).toLocaleDateString()}</p>
+                    <p><strong>Age:</strong> {calculateAge(selectedInmate.dateOfBirth)}</p>
+                    <p><strong>Address:</strong> {selectedInmate.address}</p>
+                    <p><strong>Marital Status:</strong> {selectedInmate.maritalStatus || 'N/A'}</p>
+                    <p><strong>Eye Color:</strong> {selectedInmate.eyeColor || 'N/A'}</p>
+                    <p><strong>Complexion:</strong> {selectedInmate.complexion || 'N/A'}</p>
+                  </Card.Body>
+                </Card>
+              </Col>
+              <Col md={6}>
+                <Card className="mb-3">
+                  <Card.Header>
+                    <strong>Legal Details</strong>
+                  </Card.Header>
+                  <Card.Body>
+                    <p><strong>Cell ID:</strong> {selectedInmate.cellId}</p>
+                    <p><strong>Crime:</strong> {selectedInmate.crime}</p>
+                    <p><strong>Sentence:</strong> {selectedInmate.sentence || 'N/A'}</p>
+                    <p><strong>Status:</strong> <Badge bg={getStatusVariant(selectedInmate.status)}>{selectedInmate.status}</Badge></p>
+                    <p><strong>Date From:</strong> {selectedInmate.dateFrom ? new Date(selectedInmate.dateFrom).toLocaleDateString() : 'N/A'}</p>
+                    <p><strong>Date To:</strong> {selectedInmate.dateTo ? new Date(selectedInmate.dateTo).toLocaleDateString() : 'N/A'}</p>
+                  </Card.Body>
+                </Card>
+                <Card>
+                  <Card.Header>
+                    <strong>Emergency Contact</strong>
+                  </Card.Header>
+                  <Card.Body>
+                    <p><strong>Name:</strong> {selectedInmate.emergencyName || 'N/A'}</p>
+                    <p><strong>Contact:</strong> {selectedInmate.emergencyContact || 'N/A'}</p>
+                    <p><strong>Relationship:</strong> {selectedInmate.emergencyRelation || 'N/A'}</p>
+                  </Card.Body>
+                </Card>
+              </Col>
+            </Row>
+          </>
+        )}
+      </Modal.Body>
+      <Modal.Footer>
+        <Button variant="secondary" onClick={() => setShowViewModal(false)}>
+          Close
+        </Button>
+        <Button variant="dark" onClick={printInmateDetails}>
+          <Printer size={16} className="me-1" />
+          Print
+        </Button>
+      </Modal.Footer>
+    </Modal>
+
+    {/* CSV Upload Modal */}
+<Modal show={showUploadModal} onHide={() => setShowUploadModal(false)} size="lg" centered>
+      <Modal.Header closeButton>
+        <Modal.Title>Import Inmates from CSV</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <Alert variant="info" className="mb-4">
+          <strong>CSV Format Requirements:</strong>
+          <br />
+          Your CSV file should include these columns in the header row:
+          <ul className="mb-0 mt-2">
+            <li><strong>Last Name</strong> (required)</li>
+            <li><strong>First Name</strong> (required)</li>
+            <li><strong>Middle Name</strong> (optional)</li>
+            <li><strong>Extension</strong> (optional - Jr, Sr, III)</li>
+            <li><strong>Gender</strong> (required - Male or Female)</li>
+            <li><strong>Date of Birth</strong> (required - YYYY-MM-DD or MM/DD/YYYY)</li>
+            <li><strong>Address</strong> (required)</li>
+            <li><strong>Marital Status</strong> (optional - Single, Married, Divorced, Widowed, Separated)</li>
+            <li><strong>Eye Color</strong> (optional)</li>
+            <li><strong>Complexion</strong> (optional)</li>
+            <li><strong>Cell ID</strong> (required)</li>
+            <li><strong>Sentence</strong> (optional)</li>
+            <li><strong>Date From</strong> (optional - YYYY-MM-DD or MM/DD/YYYY)</li>
+            <li><strong>Date To</strong> (optional - YYYY-MM-DD or MM/DD/YYYY)</li>
+            <li><strong>Crime</strong> (required)</li>
+            <li><strong>Emergency Name</strong> (optional)</li>
+            <li><strong>Emergency Contact</strong> (optional)</li>
+            <li><strong>Emergency Relation</strong> (optional)</li>
+            <li><strong>Status</strong> (required - active, inactive, released, transferred)</li>
+          </ul>
+        </Alert>
+
+        <Form.Group>
+          <Form.Label>Select CSV File</Form.Label>
+          <Form.Control
+            type="file"
+            accept=".csv"
+            onChange={handleFileUpload}
+          />
+          <Form.Text className="text-muted">
+            CSV file should have headers matching the format above. File will be processed immediately after selection.
+          </Form.Text>
+        </Form.Group>
+
+        {csvFile && (
+          <Alert variant="success" className="mt-3">
+            <strong>File selected:</strong> {csvFile.name}
+            <br />
+            <small>Ready to upload. Click "Upload CSV" to proceed.</small>
+          </Alert>
+        )}
+      </Modal.Body>
+      <Modal.Footer>
+        <Button variant="secondary" onClick={() => {
+          setShowUploadModal(false);
+          setCsvFile(null);
+        }}>
+          Cancel
+        </Button>
+        <Button 
+          variant="dark" 
+          onClick={handleCsvUpload} 
+          disabled={!csvFile || isLoading}
+        >
+          {isLoading ? <Spinner size="sm" /> : 'Upload CSV'}
+        </Button>
+      </Modal.Footer>
+    </Modal>
+  </Container>
   );
 };
 

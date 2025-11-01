@@ -39,12 +39,15 @@ const Visitors = () => {
   const [imageFile, setImageFile] = useState(null);
   const [prisonerIdSuggestions, setPrisonerIdSuggestions] = useState([]);
   const [prisonerIdInput, setPrisonerIdInput] = useState('');
+  const [prisonerNameInput, setPrisonerNameInput] = useState('');
+  const [prisonerNameSuggestions, setPrisonerNameSuggestions] = useState([]);
 
   const searchOptions = [
     { value: 'lastName', label: 'Last Name' },
     { value: 'firstName', label: 'First Name' },
     { value: 'id', label: 'Visitor ID' },
     { value: 'prisonerId', label: 'Prisoner ID' },
+    { value: 'prisonerName', label: 'Prisoner Name' },
     { value: 'relationship', label: 'Relationship' },
     { value: 'status', label: 'Status' }
   ];
@@ -99,6 +102,13 @@ const Visitors = () => {
 
     const filtered = visitors.filter(visitor => {
       const query = searchQuery.toLowerCase();
+      
+      if (searchBy === 'prisonerName') {
+        // Search in prisonerName field
+        const prisonerName = visitor.prisonerName?.toString().toLowerCase() || '';
+        return prisonerName.includes(query);
+      }
+      
       const value = visitor[searchBy]?.toString().toLowerCase() || '';
       return value.includes(query);
     });
@@ -127,19 +137,53 @@ const Visitors = () => {
     }));
   };
 
+  const handlePrisonerNameChange = (e) => {
+    const value = e.target.value;
+    setPrisonerNameInput(value);
+    
+    // Filter suggestions based on name input
+    if (value.trim()) {
+      const filtered = inmates.filter(inmate => 
+        inmate.fullName.toLowerCase().includes(value.toLowerCase()) ||
+        inmate.lastName.toLowerCase().includes(value.toLowerCase()) ||
+        inmate.firstName.toLowerCase().includes(value.toLowerCase())
+      ).slice(0, 5); // Show only top 5 suggestions
+      setPrisonerNameSuggestions(filtered);
+    } else {
+      setPrisonerNameSuggestions([]);
+    }
+  };
+
   const selectPrisonerSuggestion = (inmate) => {
-    setPrisonerIdInput(`${inmate.inmateCode} - ${inmate.fullName}`);
+    setPrisonerIdInput(inmate.inmateCode);
+    setPrisonerNameInput(inmate.fullName);
+    setPrisonerIdSuggestions([]);
+    setPrisonerNameSuggestions([]);
+    
     setFormData(prev => ({
       ...prev,
       prisonerId: inmate.inmateCode
     }));
+  };
+
+  const selectPrisonerNameSuggestion = (inmate) => {
+    setPrisonerNameInput(inmate.fullName);
+    setPrisonerIdInput(inmate.inmateCode);
+    setPrisonerNameSuggestions([]);
     setPrisonerIdSuggestions([]);
+    
+    setFormData(prev => ({
+      ...prev,
+      prisonerId: inmate.inmateCode
+    }));
   };
 
   const handleAdd = () => {
     setEditingVisitor(null);
     setPrisonerIdInput('');
+    setPrisonerNameInput('');
     setPrisonerIdSuggestions([]);
+    setPrisonerNameSuggestions([]);
     const initialData = {
       lastName: '',
       firstName: '',
@@ -152,7 +196,7 @@ const Visitors = () => {
       contact: '',
       prisonerId: '',
       relationship: '',
-      status: 'approved' // Auto-approved for admin
+      status: 'approved'
     };
     setFormData(initialData);
     setImageFile(null);
@@ -162,7 +206,10 @@ const Visitors = () => {
   const handleEdit = (visitor) => {
     setEditingVisitor(visitor);
     setPrisonerIdInput(visitor.prisonerId);
+    setPrisonerNameInput(visitor.prisonerName || '');
     setPrisonerIdSuggestions([]);
+    setPrisonerNameSuggestions([]);
+    
     const formattedVisitor = {
       ...visitor,
       dateOfBirth: visitor.dateOfBirth ? visitor.dateOfBirth.split('T')[0] : ''
@@ -254,7 +301,7 @@ const Visitors = () => {
     try {
       const submitData = new FormData();
       
-      // Format data properly
+      // Format data properly - backend will handle prisoner name lookup
       const formattedData = {
         ...formData,
         middleName: formData.middleName || '',
@@ -314,76 +361,87 @@ const Visitors = () => {
   };
 
   const handleCsvUpload = async () => {
-    if (!csvFile) {
-      toast.error('Please select a CSV file');
-      return;
-    }
+  if (!csvFile) {
+    toast.error('Please select a CSV file');
+    return;
+  }
 
-    setIsLoading(true);
-    const formData = new FormData();
-    formData.append('csvFile', csvFile);
+  setIsLoading(true);
+  const formData = new FormData();
+  formData.append('csvFile', csvFile);
 
-    try {
-      const response = await axios.post('http://localhost:5000/visitors/upload-csv', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
-      toast.success(response.data.message);
-      setShowUploadModal(false);
-      setCsvFile(null);
-      fetchVisitors(); // This will re-fetch and re-sort the visitors
-    } catch (error) {
-      console.error('Error uploading CSV:', error);
-      toast.error(error.response?.data?.message || 'Failed to upload CSV');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const exportToCSV = () => {
-    const headers = [
-      'Visitor ID', 'Last Name', 'First Name', 'Middle Name', 'Extension',
-      'Date of Birth', 'Age', 'Gender', 'Address', 'Contact',
-      'Prisoner ID', 'Relationship', 'Status', 'Date Visited', 'Time In', 'Time Out',
-      'Violation Type', 'Violation Details'
-    ];
-
-    const csvData = visitors.map(visitor => [
-      visitor.id,
-      visitor.lastName,
-      visitor.firstName,
-      visitor.middleName || '',
-      visitor.extension || '',
-      visitor.dateOfBirth ? new Date(visitor.dateOfBirth).toLocaleDateString() : '',
-      visitor.age || '',
-      visitor.sex,
-      visitor.address,
-      visitor.contact,
-      visitor.prisonerId,
-      visitor.relationship,
-      visitor.status,
-      visitor.dateVisited ? new Date(visitor.dateVisited).toLocaleDateString() : 'Not visited',
-      visitor.timeIn || 'Not recorded',
-      visitor.timeOut || 'Not recorded',
-      visitor.violationType || 'No violation',
-      visitor.violationDetails || 'No violation data'
-    ]);
-
-    const csvContent = [headers, ...csvData]
-      .map(row => row.map(field => `"${field}"`).join(','))
-      .join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `visitors_${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
-    window.URL.revokeObjectURL(url);
+  try {
+    const response = await axios.post('http://localhost:5000/visitors/upload-csv', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    });
     
-    toast.success(`Exported ${visitors.length} visitors to CSV`);
-  };
+    if (response.data.errors && response.data.errors.length > 0) {
+      // Show errors but still success message
+      toast.warning(`Imported ${response.data.imported} visitors with ${response.data.errors.length} errors`);
+    } else {
+      toast.success(`Successfully imported ${response.data.imported} visitors`);
+    }
+    
+    setShowUploadModal(false);
+    setCsvFile(null);
+    fetchVisitors(); // This will re-fetch and re-sort the visitors
+  } catch (error) {
+    console.error('Error uploading CSV:', error);
+    toast.error(error.response?.data?.message || 'Failed to upload CSV');
+  } finally {
+    setIsLoading(false);
+  }
+};
+
+ const exportToCSV = () => {
+  const headers = [
+    'Visitor ID', 
+    'Last Name', 
+    'First Name', 
+    'Middle Name', 
+    'Extension',
+    'Date of Birth', 
+    'Age', 
+    'Gender', 
+    'Address', 
+    'Contact',
+    'Inmate ID', 
+    'Inmate Name',
+    'Relationship'
+  ];
+
+  const csvData = filteredVisitors.map(visitor => [
+    visitor.id,
+    visitor.lastName,
+    visitor.firstName,
+    visitor.middleName || '',
+    visitor.extension || '',
+    visitor.dateOfBirth ? new Date(visitor.dateOfBirth).toLocaleDateString() : '',
+    visitor.age || '',
+    visitor.sex,
+    visitor.address,
+    visitor.contact,
+    visitor.prisonerId,
+    visitor.prisonerName || 'N/A',
+    visitor.relationship
+  ]);
+
+  const csvContent = [headers, ...csvData]
+    .map(row => row.map(field => `"${field}"`).join(','))
+    .join('\n');
+
+  const blob = new Blob([csvContent], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `all_visitors_${new Date().toISOString().split('T')[0]}.csv`;
+  link.click();
+  window.URL.revokeObjectURL(url);
+  
+  toast.success(`Exported ${filteredVisitors.length} visitors to CSV`);
+};
 
   const downloadQRCode = () => {
     if (!selectedQRVisitor?.qrCode) return;
@@ -413,7 +471,9 @@ const Visitors = () => {
       status: 'approved'
     });
     setPrisonerIdInput('');
+    setPrisonerNameInput('');
     setPrisonerIdSuggestions([]);
+    setPrisonerNameSuggestions([]);
     setImageFile(null);
   };
 
@@ -477,30 +537,8 @@ const Visitors = () => {
     }
   };
 
-  const formatTime = (timeString) => {
-    if (!timeString) return 'Not recorded';
-    return timeString;
-  };
-
-  // Updated table columns to include time tracking
-  const tableColumns = [
-    { key: 'id', label: 'Visitor ID' },
-    { key: 'fullName', label: 'Full Name' },
-    { key: 'sex', label: 'Gender' },
-    { key: 'prisonerId', label: 'Prisoner ID' },
-    { key: 'relationship', label: 'Relationship' },
-    { key: 'dateVisited', label: 'Date Visited' },
-    { key: 'timeIn', label: 'Time In' },
-    { key: 'timeOut', label: 'Time Out' },
-    { key: 'timeStatus', label: 'Time Status' },
-    { key: 'status', label: 'Status' },
-    { key: 'violationType', label: 'Violation Type' },
-    { key: 'actions', label: 'Actions' }
-  ];
-
   const printVisitorDetails = () => {
   const printWindow = window.open('', '_blank');
-  const timeStatus = getTimeStatus(selectedVisitor);
   
   printWindow.document.write(`
     <html>
@@ -566,12 +604,6 @@ const Visitors = () => {
           .full-width {
             grid-column: 1 / -1;
           }
-          .violation { 
-            background-color: #ffe6e6; 
-            border-left: 4px solid #dc3545;
-            padding: 10px;
-            margin: 10px 0;
-          }
           .qr-code {
             text-align: center;
             margin: 20px 0;
@@ -608,16 +640,16 @@ const Visitors = () => {
             margin-bottom: 10px;
             color: #2c3e50;
           }
-          .time-status {
+          .status-badge {
             display: inline-block;
             padding: 4px 8px;
             border-radius: 4px;
             color: white;
             font-weight: bold;
+            background-color: #28a745;
           }
-          .status-success { background-color: #28a745; }
-          .status-info { background-color: #17a2b8; }
-          .status-secondary { background-color: #6c757d; }
+          .status-pending { background-color: #ffc107; color: #000; }
+          .status-rejected { background-color: #dc3545; }
           @media print {
             body { margin: 10px; }
             .section { border: none; }
@@ -636,25 +668,6 @@ const Visitors = () => {
         </div>
         
         ${selectedVisitor ? `
-          <div class="section">
-            <h3>Time Tracking Information</h3>
-            <div class="info-grid">
-              <div class="info-item">
-                <span class="label">Visit Date:</span> ${selectedVisitor.dateVisited ? new Date(selectedVisitor.dateVisited).toLocaleDateString() : 'Not yet visited'}
-              </div>
-              <div class="info-item">
-                <span class="label">Time In:</span> ${selectedVisitor.timeIn || 'Not recorded'}
-              </div>
-              <div class="info-item">
-                <span class="label">Time Out:</span> ${selectedVisitor.timeOut || 'Not recorded'}
-              </div>
-              <div class="info-item">
-                <span class="label">Time Status:</span> 
-                <span class="time-status status-${timeStatus.variant}">${timeStatus.text}</span>
-              </div>
-            </div>
-          </div>
-
           <div class="section">
             <h3>Identification</h3>
             <div class="photo-container">
@@ -681,6 +694,9 @@ const Visitors = () => {
             <h3>Visitor Information</h3>
             <div class="info-grid">
               <div class="info-item">
+                <span class="label">Visitor ID:</span> ${selectedVisitor.id}
+              </div>
+              <div class="info-item">
                 <span class="label">Full Name:</span> ${selectedVisitor.fullName}
               </div>
               <div class="info-item">
@@ -699,7 +715,8 @@ const Visitors = () => {
                 <span class="label">Contact:</span> ${selectedVisitor.contact || 'N/A'}
               </div>
               <div class="info-item">
-                <span class="label">Status:</span> ${selectedVisitor.status.toUpperCase()}
+                <span class="label">Status:</span> 
+                <span class="status-badge status-${selectedVisitor.status}">${selectedVisitor.status.toUpperCase()}</span>
               </div>
             </div>
           </div>
@@ -708,27 +725,16 @@ const Visitors = () => {
             <h3>Visit Details</h3>
             <div class="info-grid">
               <div class="info-item">
-                <span class="label">Prisoner ID:</span> ${selectedVisitor.prisonerId}
+                <span class="label">Inmate ID:</span> ${selectedVisitor.prisonerId}
+              </div>
+              <div class="info-item">
+                <span class="label">Inmate Name:</span> ${selectedVisitor.prisonerName || 'N/A'}
               </div>
               <div class="info-item">
                 <span class="label">Relationship:</span> ${selectedVisitor.relationship}
               </div>
             </div>
           </div>
-
-          ${selectedVisitor.violationType ? `
-          <div class="section">
-            <h3>Violation Information</h3>
-            <div class="violation">
-              <div class="info-item">
-                <span class="label">Violation Type:</span> ${selectedVisitor.violationType}
-              </div>
-              <div class="info-item full-width">
-                <span class="label">Violation Details:</span> ${selectedVisitor.violationDetails || 'No violation data'}
-              </div>
-            </div>
-          </div>
-          ` : ''}
 
           <div class="section">
             <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
@@ -828,91 +834,95 @@ const Visitors = () => {
           {searchQuery ? 'No visitors found matching your search.' : 'No visitors found. Add your first visitor to get started.'}
         </Alert>
       ) : (
-        <Table striped bordered hover responsive className="bg-white">
-  <thead className="table-dark">
-    <tr>
-      <th>Visitor ID</th>
-      <th>Full Name</th>
-      <th>Gender</th>
-      <th>Prisoner ID</th>
-      <th>Relationship</th>
-      <th>Last Visit Date</th>
-      <th>Time Status</th>
-      <th>Violation Type</th>
-      <th style={{ width: '120px' }}>Actions</th>
-    </tr>
-  </thead>
-  <tbody>
-    {filteredVisitors.map(visitor => (
-      <tr key={visitor._id}>
-        <td><strong>{visitor.id}</strong></td>
-        <td>{visitor.fullName}</td>
-        <td>{visitor.sex}</td>
-        <td>{visitor.prisonerId}</td>
-        <td>{visitor.relationship}</td>
-        <td>
-          {visitor.dateVisited ? (
-            <Badge bg="info">
-              {formatDate(visitor.dateVisited)}
-            </Badge>
-          ) : (
-            <Badge bg="secondary">Not visited</Badge>
-          )}
-        </td>
-        <td>
-          <Badge bg={getTimeStatus(visitor).variant}>
-            {getTimeStatus(visitor).text}
-          </Badge>
-        </td>
-        <td>
-          <Badge bg={getViolationVariant(visitor)}>
-            {getViolationText(visitor)}
-          </Badge>
-        </td>
-        <td>
-          <div className="d-flex gap-1">
-            <Button 
-              variant="outline-primary" 
-              size="sm" 
-              onClick={() => handleShowQR(visitor)}
-              className="p-1"
-              title="QR Code"
-            >
-              <Grid size={14} />
-            </Button>
-            <Button 
-              variant="outline-info" 
-              size="sm" 
-              onClick={() => handleView(visitor)}
-              className="p-1"
-              title="View Details"
-            >
-              <Eye size={14} />
-            </Button>
-            <Button 
-              variant="outline-warning" 
-              size="sm" 
-              onClick={() => handleEdit(visitor)}
-              className="p-1"
-              title="Edit Visitor"
-            >
-              <Edit2 size={14} />
-            </Button>
-            <Button 
-              variant="outline-danger" 
-              size="sm" 
-              onClick={() => handleDelete(visitor.id)}
-              className="p-1"
-              title="Delete Visitor"
-            >
-              <Trash2 size={14} />
-            </Button>
-          </div>
-        </td>
+        <div className="table-responsive" style={{ fontSize: '14px' }}>
+  <Table striped bordered hover responsive className="visitors-table bg-white">
+    <thead className="table-dark">
+      <tr>
+        <th className="text-center">Visitor ID</th>
+        <th className="text-center">Full Name</th>
+        <th className="text-center">Gender</th>
+        <th className="text-center">Inmate ID</th>
+        <th className="text-center">Inmate Name</th>
+        <th className="text-center">Relationship</th>
+        <th className="text-center">Last Visit</th>
+        <th className="text-center">Time Status</th>
+        <th className="text-center">Violation</th>
+        <th className="text-center" style={{ width: '140px', minWidth: '140px' }}>Actions</th>
       </tr>
-    ))}
-  </tbody>
-</Table>
+    </thead>
+    <tbody>
+      {filteredVisitors.map(visitor => (
+        <tr key={visitor._id}>
+          <td className="text-center"><strong>{visitor.id}</strong></td>
+          <td className="text-center">{visitor.fullName}</td>
+          <td className="text-center">{visitor.sex}</td>
+          <td className="text-center">{visitor.prisonerId}</td>
+          <td className="text-center prisoner-name">{visitor.prisonerName || 'N/A'}</td>
+          <td className="text-center">{visitor.relationship}</td>
+          <td className="text-center">
+            {visitor.lastVisitDate ? (
+              <Badge bg="info" className="text-wrap">
+                {formatDate(visitor.lastVisitDate)}
+              </Badge>
+            ) : (
+              <Badge bg="secondary" className="text-wrap">Not visited</Badge>
+            )}
+          </td>
+          <td className="text-center">
+            <Badge bg={getTimeStatus(visitor).variant} className="text-wrap">
+              {getTimeStatus(visitor).text}
+            </Badge>
+          </td>
+          <td className="text-center">
+            <Badge bg={getViolationVariant(visitor)} className="text-wrap">
+              {getViolationText(visitor)}
+            </Badge>
+          </td>
+          <td className="text-center">
+            <div className="action-buttons">
+              <Button 
+                variant="outline-primary" 
+                size="sm" 
+                onClick={() => handleShowQR(visitor)}
+                className="p-1"
+                title="QR Code"
+              >
+                <Grid size={14} />
+              </Button>
+              <Button 
+                variant="outline-info" 
+                size="sm" 
+                onClick={() => handleView(visitor)}
+                className="p-1"
+                title="View Details"
+              >
+                <Eye size={14} />
+              </Button>
+              <Button 
+                variant="outline-warning" 
+                size="sm" 
+                onClick={() => handleEdit(visitor)}
+                className="p-1"
+                title="Edit Visitor"
+              >
+                <Edit2 size={14} />
+              </Button>
+              <Button 
+                variant="outline-danger" 
+                size="sm" 
+                onClick={() => handleDelete(visitor.id)}
+                className="p-1"
+                title="Delete Visitor"
+              >
+                <Trash2 size={14} />
+              </Button>
+            </div>
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </Table>
+</div>
       )}
 
       {/* Add/Edit Modal */}
@@ -1052,13 +1062,13 @@ const Visitors = () => {
             <Row>
               <Col md={6}>
                 <Form.Group className="mb-3">
-                  <Form.Label>Prisoner ID *</Form.Label>
+                  <Form.Label>Inmate ID *</Form.Label>
                   <Form.Control
                     type="text"
                     value={prisonerIdInput}
                     onChange={handlePrisonerIdChange}
                     required
-                    placeholder="Enter prisoner ID"
+                    placeholder="Enter inmate ID"
                   />
                   {prisonerIdSuggestions.length > 0 && (
                     <div className="border mt-1" style={{ maxHeight: '150px', overflowY: 'auto' }}>
@@ -1066,7 +1076,7 @@ const Visitors = () => {
                         <div
                           key={inmate._id}
                           className="p-2 border-bottom hover-bg"
-                          style={{ cursor: 'pointer' }}
+                          style={{ cursor: 'pointer', backgroundColor: '#f8f9fa' }}
                           onClick={() => selectPrisonerSuggestion(inmate)}
                         >
                           <strong>{inmate.inmateCode}</strong> - {inmate.fullName}
@@ -1077,6 +1087,34 @@ const Visitors = () => {
                 </Form.Group>
               </Col>
               <Col md={6}>
+                <Form.Group className="mb-3">
+                  <Form.Label>Inmate Name*</Form.Label>
+                  <Form.Control
+                    type="text"
+                    value={prisonerNameInput}
+                    onChange={handlePrisonerNameChange}
+                    placeholder="Search by inmate name"
+                  />
+                  {prisonerNameSuggestions.length > 0 && (
+                    <div className="border mt-1" style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                      {prisonerNameSuggestions.map(inmate => (
+                        <div
+                          key={inmate._id}
+                          className="p-2 border-bottom hover-bg"
+                          style={{ cursor: 'pointer', backgroundColor: '#f8f9fa' }}
+                          onClick={() => selectPrisonerNameSuggestion(inmate)}
+                        >
+                          <strong>{inmate.fullName}</strong> - {inmate.inmateCode}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Form.Group>
+              </Col>
+            </Row>
+
+            <Row>
+              <Col md={12}>
                 <Form.Group className="mb-3">
                   <Form.Label>Relationship *</Form.Label>
                   <Form.Control
@@ -1120,191 +1158,168 @@ const Visitors = () => {
         </Form>
       </Modal>
 
-      {/* View Modal - Updated with Time In/Out */}
-      <Modal show={showViewModal} onHide={() => setShowViewModal(false)} size="lg">
-        <Modal.Header closeButton>
-          <Modal.Title>Visitor Details - {selectedVisitor?.id}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          {selectedVisitor && (
-            <Row>
-              <Col md={12}>
-                <Card className="mb-4">
-                  <Card.Header>
-                    <strong>Time Tracking Information</strong>
-                  </Card.Header>
-                  <Card.Body>
-                    <Row>
-                      <Col md={6}>
-                        <p><strong>Visit Date:</strong> {selectedVisitor.dateVisited ? new Date(selectedVisitor.dateVisited).toLocaleDateString() : 'Not yet visited'}</p>
-                        <p><strong>Time In:</strong> {selectedVisitor.timeIn || 'Not recorded'}</p>
-                      </Col>
-                      <Col md={6}>
-                        <p><strong>Time Out:</strong> {selectedVisitor.timeOut || 'Not recorded'}</p>
-                        <p><strong>Time Status:</strong> <Badge bg={getTimeStatus(selectedVisitor).variant}>{getTimeStatus(selectedVisitor).text}</Badge></p>
-                      </Col>
-                    </Row>
-                  </Card.Body>
-                </Card>
-              </Col>
-
-              <Col md={12}>
-                <Card className="mb-4">
-                  <Card.Header>
-                    <strong>QR Code</strong>
-                  </Card.Header>
-                  <Card.Body className="text-center">
-                    {selectedVisitor.qrCode ? (
-                      <img 
-                        src={selectedVisitor.qrCode} 
-                        alt="Visitor QR Code" 
-                        style={{ 
-                          maxWidth: '300px', 
-                          height: 'auto',
-                          border: '1px solid #ddd',
-                          borderRadius: '5px'
-                        }}
-                      />
-                    ) : (
-                      <Alert variant="warning">
-                        QR code not generated yet.
-                      </Alert>
-                    )}
-                  </Card.Body>
-                </Card>
-              </Col>
-              
-              <Col md={6}>
-                <Card className="mb-3">
-                  <Card.Header>
-                    <strong>Visitor Information</strong>
-                  </Card.Header>
-                  <Card.Body>
-                    {selectedVisitor.photo && (
-                      <div className="text-center mb-3">
-                        <img 
-                          src={`http://localhost:5000/uploads/${selectedVisitor.photo}`}
-                          alt="Visitor"
-                          style={{ 
-                            maxWidth: '200px', 
-                            maxHeight: '200px', 
-                            objectFit: 'cover',
-                            borderRadius: '5px'
-                          }}
-                        />
-                      </div>
-                    )}
-                    <p><strong>Full Name:</strong> {selectedVisitor.fullName}</p>
-                    <p><strong>Gender:</strong> {selectedVisitor.sex}</p>
-                    <p><strong>Date of Birth:</strong> {new Date(selectedVisitor.dateOfBirth).toLocaleDateString()}</p>
-                    <p><strong>Age:</strong> {calculateAge(selectedVisitor.dateOfBirth)}</p>
-                    <p><strong>Address:</strong> {selectedVisitor.address}</p>
-                    <p><strong>Contact:</strong> {selectedVisitor.contact || 'N/A'}</p>
-                    <p><strong>Status:</strong> <Badge bg={getStatusVariant(selectedVisitor.status)}>{selectedVisitor.status}</Badge></p>
-                  </Card.Body>
-                </Card>
-              </Col>
-              <Col md={6}>
-                <Card className="mb-3">
-                  <Card.Header>
-                    <strong>Visit Details</strong>
-                  </Card.Header>
-                  <Card.Body>
-                    <p><strong>Prisoner ID:</strong> {selectedVisitor.prisonerId}</p>
-                    <p><strong>Relationship:</strong> {selectedVisitor.relationship}</p>
-                  </Card.Body>
-                </Card>
-                
-                {selectedVisitor.violationType && (
-                  <Card className="mb-3 border-danger">
-                    <Card.Header className="bg-danger text-white">
-                      <strong>Violation Information</strong>
-                    </Card.Header>
-                    <Card.Body>
-                      <p><strong>Violation Type:</strong> {selectedVisitor.violationType}</p>
-                      <p><strong>Violation Details:</strong> {selectedVisitor.violationDetails || 'No violation data'}</p>
-                    </Card.Body>
-                  </Card>
-                )}
-              </Col>
-            </Row>
-          )}
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowViewModal(false)}>
-            Close
-          </Button>
-          <Button variant="dark" onClick={printVisitorDetails}>
-            <Printer size={16} className="me-1" />
-            Print
-          </Button>
-        </Modal.Footer>
-      </Modal>
-
-      {/* QR Code Modal */}
-      <Modal show={showQRModal} onHide={() => setShowQRModal(false)} size="sm">
-        <Modal.Header closeButton>
-          <Modal.Title>Visitor QR Code - {selectedQRVisitor?.id}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body className="text-center">
-          {selectedQRVisitor && (
-            <>
-              {selectedQRVisitor.qrCode ? (
-                <>
-                  <img 
-                    src={selectedQRVisitor.qrCode} 
-                    alt="Visitor QR Code" 
-                    style={{ maxWidth: '100%', height: 'auto' }}
-                  />
-                  <p className="mt-3"><strong>{selectedQRVisitor.fullName}</strong></p>
-                  <p className="text-muted">Visitor ID: {selectedQRVisitor.id}</p>
-                </>
+      {/* View Modal */}
+<Modal show={showViewModal} onHide={() => setShowViewModal(false)} size="lg">
+  <Modal.Header closeButton>
+    <Modal.Title>Visitor Details - {selectedVisitor?.id}</Modal.Title>
+  </Modal.Header>
+  <Modal.Body>
+    {selectedVisitor && (
+      <Row>
+        {/* QR Code Section */}
+        <Col md={12}>
+          <Card className="mb-4">
+            <Card.Header>
+              <strong>QR Code</strong>
+            </Card.Header>
+            <Card.Body className="text-center">
+              {selectedVisitor.qrCode ? (
+                <img 
+                  src={selectedVisitor.qrCode} 
+                  alt="Visitor QR Code" 
+                  style={{ 
+                    maxWidth: '300px', 
+                    height: 'auto',
+                    border: '1px solid #ddd',
+                    borderRadius: '5px'
+                  }}
+                />
               ) : (
                 <Alert variant="warning">
-                  QR code not generated yet. Please wait or regenerate QR code.
+                  QR code not generated yet.
                 </Alert>
               )}
-            </>
-          )}
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowQRModal(false)}>
-            Close
-          </Button>
-          <Button variant="dark" onClick={downloadQRCode} disabled={!selectedQRVisitor?.qrCode}>
-            <Download size={16} className="me-1" />
-            Download QR
-          </Button>
-        </Modal.Footer>
-      </Modal>
+            </Card.Body>
+          </Card>
+        </Col>
+        
+        {/* Visitor Photo and Information */}
+        <Col md={6}>
+          <Card className="mb-3">
+            <Card.Header>
+              <strong>Visitor Information</strong>
+            </Card.Header>
+            <Card.Body>
+              {selectedVisitor.photo && (
+                <div className="text-center mb-3">
+                  <img 
+                    src={`http://localhost:5000/uploads/${selectedVisitor.photo}`}
+                    alt="Visitor"
+                    style={{ 
+                      maxWidth: '200px', 
+                      maxHeight: '200px', 
+                      objectFit: 'cover',
+                      borderRadius: '5px'
+                    }}
+                  />
+                </div>
+              )}
+              <p><strong>Visitor ID:</strong> {selectedVisitor.id}</p>
+              <p><strong>Full Name:</strong> {selectedVisitor.fullName}</p>
+              <p><strong>Gender:</strong> {selectedVisitor.sex}</p>
+              <p><strong>Date of Birth:</strong> {new Date(selectedVisitor.dateOfBirth).toLocaleDateString()}</p>
+              <p><strong>Age:</strong> {calculateAge(selectedVisitor.dateOfBirth)}</p>
+              <p><strong>Address:</strong> {selectedVisitor.address}</p>
+              <p><strong>Contact:</strong> {selectedVisitor.contact || 'N/A'}</p>
+              <p><strong>Status:</strong> <Badge bg={getStatusVariant(selectedVisitor.status)}>{selectedVisitor.status}</Badge></p>
+            </Card.Body>
+          </Card>
+        </Col>
+        
+        {/* Inmate Information Only */}
+        <Col md={6}>
+          <Card className="mb-3">
+            <Card.Header>
+              <strong>Visit Details</strong>
+            </Card.Header>
+            <Card.Body>
+              <p><strong>Inmate ID:</strong> {selectedVisitor.prisonerId}</p>
+              <p><strong>Inmate Name:</strong> {selectedVisitor.prisonerName || 'N/A'}</p>
+              <p><strong>Relationship:</strong> {selectedVisitor.relationship}</p>
+            </Card.Body>
+          </Card>
+        </Col>
+      </Row>
+    )}
+  </Modal.Body>
+  <Modal.Footer>
+    <Button variant="secondary" onClick={() => setShowViewModal(false)}>
+      Close
+    </Button>
+    <Button variant="dark" onClick={printVisitorDetails}>
+      <Printer size={16} className="me-1" />
+      Print
+    </Button>
+  </Modal.Footer>
+</Modal>
 
       {/* CSV Upload Modal */}
-      <Modal show={showUploadModal} onHide={() => setShowUploadModal(false)}>
-        <Modal.Header closeButton>
-          <Modal.Title>Import Visitors from CSV</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <Form.Group>
-            <Form.Label>Select CSV File</Form.Label>
-            <Form.Control
-              type="file"
-              accept=".csv"
-              onChange={handleFileUpload}
-            />
-            <Form.Text className="text-muted">
-              CSV should include columns: lastName, firstName, middleName, extension, dateOfBirth, sex, address, contact, prisonerId, relationship
-            </Form.Text>
-          </Form.Group>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowUploadModal(false)}>
-            Cancel
-          </Button>
-          <Button variant="dark" onClick={handleCsvUpload} disabled={!csvFile || isLoading}>
-            {isLoading ? <Spinner size="sm" /> : 'Upload CSV'}
-          </Button>
-        </Modal.Footer>
-      </Modal>
+<Modal 
+  show={showUploadModal} 
+  onHide={() => setShowUploadModal(false)} 
+  size="lg"
+  centered
+  dialogClassName="modal-lower"
+>
+  <Modal.Header closeButton>
+    <Modal.Title>Import Visitors from CSV</Modal.Title>
+  </Modal.Header>
+  <Modal.Body>
+    <Alert variant="info" className="mb-4">
+      <strong>CSV Format Requirements:</strong>
+      <br />
+      Your CSV file should include these columns in the header row:
+      <ul className="mb-0 mt-2">
+        <li><strong>Last Name</strong> (required)</li>
+        <li><strong>First Name</strong> (required)</li>
+        <li><strong>Middle Name</strong> (optional)</li>
+        <li><strong>Extension</strong> (optional - Jr, Sr, III)</li>
+        <li><strong>Date of Birth</strong> (required - YYYY-MM-DD or MM/DD/YYYY)</li>
+        <li><strong>Gender</strong> (required - Male or Female)</li>
+        <li><strong>Address</strong> (required)</li>
+        <li><strong>Contact</strong> (required)</li>
+        <li><strong>Inmate ID</strong> (required)</li>
+        <li><strong>Inmate Name</strong> (recommended - will be looked up if not provided)</li>
+        <li><strong>Relationship</strong> (required - e.g., Spouse, Parent, Friend)</li>
+      </ul>
+    </Alert>
+
+    <Form.Group>
+      <Form.Label>Select CSV File</Form.Label>
+      <Form.Control
+        type="file"
+        accept=".csv"
+        onChange={handleFileUpload}
+      />
+      <Form.Text className="text-muted">
+        CSV file should have headers matching the format above. File will be processed immediately after selection.
+      </Form.Text>
+    </Form.Group>
+
+    {csvFile && (
+      <Alert variant="success" className="mt-3">
+        <strong>File selected:</strong> {csvFile.name}
+        <br />
+        <small>Ready to upload. Click "Upload CSV" to proceed.</small>
+      </Alert>
+    )}
+  </Modal.Body>
+  <Modal.Footer>
+    <Button variant="secondary" onClick={() => {
+      setShowUploadModal(false);
+      setCsvFile(null);
+    }}>
+      Cancel
+    </Button>
+    <Button 
+      variant="dark" 
+      onClick={handleCsvUpload} 
+      disabled={!csvFile || isLoading}
+    >
+      {isLoading ? <Spinner size="sm" /> : 'Upload CSV'}
+    </Button>
+  </Modal.Footer>
+</Modal>
     </Container>
   );
 };

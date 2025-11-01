@@ -84,7 +84,6 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       const cameras = await QrScanner.listCameras();
       setAvailableCameras(cameras);
       if (cameras.length > 0) {
-        // Try to find rear camera first, otherwise use first available
         const rearCamera = cameras.find(cam => 
           cam.label.toLowerCase().includes('back') || 
           cam.label.toLowerCase().includes('rear') ||
@@ -105,10 +104,26 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
         setRetryCount(0);
         setScanConfidence(0);
         setScanAttempts(0);
+        applyCameraOrientation(cameraId);
       } catch (error) {
         console.error('Error switching camera:', error);
         setScanError('Failed to switch camera. Please try again.');
       }
+    }
+  };
+
+  const applyCameraOrientation = (cameraId) => {
+    if (!videoRef.current) return;
+    
+    const camera = availableCameras.find(cam => cam.id === cameraId);
+    const isFrontCamera = camera?.label.toLowerCase().includes('front');
+    
+    if (isFrontCamera) {
+      videoRef.current.style.transform = 'scaleX(-1)';
+      videoRef.current.style.webkitTransform = 'scaleX(-1)';
+    } else {
+      videoRef.current.style.transform = 'scaleX(1)';
+      videoRef.current.style.webkitTransform = 'scaleX(1)';
     }
   };
 
@@ -130,9 +145,8 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
           highlightScanRegion: true,
           highlightCodeOutline: true,
           returnDetailedScanResult: true,
-          maxScansPerSecond: 2,
+          maxScansPerSecond: 3,
           
-          // FIXED: Remove mirroring and use proper camera orientation
           calculateScanRegion: (video) => {
             const size = Math.min(video.videoWidth, video.videoHeight) * 0.7;
             return {
@@ -158,17 +172,7 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       
       await newScanner.start();
       
-      // FIXED: Remove mirror effect for non-front cameras
-      if (videoRef.current) {
-        const isFrontCamera = selectedCamera && cameras.find(cam => cam.id === selectedCamera)?.label.toLowerCase().includes('front');
-        if (!isFrontCamera) {
-          videoRef.current.style.transform = 'scaleX(1)'; // Normal orientation for rear camera
-          videoRef.current.style.webkitTransform = 'scaleX(1)';
-        } else {
-          videoRef.current.style.transform = 'scaleX(-1)'; // Mirror only for front camera
-          videoRef.current.style.webkitTransform = 'scaleX(-1)';
-        }
-      }
+      applyCameraOrientation(selectedCamera);
       
       setScanner(newScanner);
       setIsScanning(true);
@@ -232,8 +236,8 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       setScanSuccess(true);
       
       validationTimeoutRef.current = setTimeout(() => {
-        debouncedHandleScan(result.data, confidence);
-      }, 800);
+        processScannedQRCode(result.data, confidence);
+      }, 600);
     } else {
       setScanError(`Low scan quality (${confidence}%). Hold steady and center the QR code.`);
       
@@ -291,8 +295,8 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       if (result && result.data) {
         setScanSuccess(true);
         setTimeout(() => {
-          debouncedHandleScan(result.data, 95);
-        }, 1000);
+          processScannedQRCode(result.data, 95);
+        }, 800);
       } else {
         setScanError('No QR code found in the uploaded image. Please try another image.');
         setIsProcessingUpload(false);
@@ -306,33 +310,216 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     }
   };
 
-  // Refresh person data to get complete details
-  const refreshPersonData = async (personId, personType) => {
-    try {
-      console.log('🔄 Refreshing person data for:', personId, personType);
-      const response = await axios.get(`http://localhost:5000/${personType}s/${personId}`);
-      console.log('✅ Refreshed person data:', response.data);
-      return response.data;
-    } catch (error) {
-      console.error('❌ Error refreshing person data:', error);
-      return null;
+  // BULLETPROOF: Enhanced person data fetcher with multiple fallbacks
+  const fetchCompletePersonData = async (personId, isGuest, maxRetries = 3) => {
+    const endpoint = `http://localhost:5000/${isGuest ? 'guests' : 'visitors'}/${personId}`;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🔄 Fetching person data attempt ${attempt}/${maxRetries}...`);
+        const response = await axios.get(endpoint, { timeout: 10000 });
+        
+        if (response.data && (response.data.id || response.data.visitorId)) {
+          console.log(`✅ Successfully fetched complete person data on attempt ${attempt}`);
+          return response.data;
+        } else {
+          console.warn(`⚠️ Incomplete data received on attempt ${attempt}`, response.data);
+        }
+      } catch (error) {
+        console.error(`❌ Attempt ${attempt} failed:`, error.message);
+        
+        if (attempt === maxRetries) {
+          throw new Error(`Failed to fetch person data after ${maxRetries} attempts: ${error.message}`);
+        }
+        
+        // Wait before retry (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      }
     }
+    
+    throw new Error('All attempts to fetch person data failed');
+  };
+
+  // BULLETPROOF: Enhanced QR code processing
+  const processScannedQRCode = async (qrData, confidence) => {
+    if (isLoading || qrData === lastScannedCode) return;
+    
+    let personId;
+    let isGuest = false;
+    
+    try {
+      setIsLoading(true);
+      setScanError(null);
+      setLastScannedCode(qrData);
+      setRetryCount(0);
+
+      console.log('🔍 RAW QR DATA:', qrData);
+
+      // Parse QR data to get person ID and type
+      try {
+        const parsedData = JSON.parse(qrData);
+        personId = parsedData.id || parsedData.visitorId;
+        isGuest = detectPersonType(qrData) === 'guest';
+        console.log('📋 PARSED QR DATA:', { personId, isGuest, parsedData });
+      } catch (e) {
+        personId = qrData;
+        isGuest = detectPersonType(qrData) === 'guest';
+        console.log('📋 SIMPLE QR DATA:', { personId, isGuest });
+      }
+
+      if (!personId) {
+        setScanError('Invalid QR code format.');
+        throw new Error('No person ID found in QR data');
+      }
+
+      console.log('🔄 CALLING SCAN-PROCESS ENDPOINT...');
+      
+      // Step 1: Use scan-process endpoint to determine scan type
+      const scanResponse = await axios.post("http://localhost:5000/scan-process", {
+        qrData: qrData,
+        personId: personId,
+        isGuest: isGuest
+      }, { timeout: 15000 });
+
+      const scanResult = scanResponse.data;
+      console.log('📊 SCAN PROCESS RESULT:', scanResult);
+
+      if (!scanResult.person) {
+        setScanError(`${isGuest ? 'Guest' : 'Visitor'} not found in database.`);
+        throw new Error('Person not found in scan process result');
+      }
+
+      // Step 2: BULLETPROOF - Fetch complete person data with retries
+      console.log('🔄 FETCHING COMPLETE PERSON DETAILS...');
+      let completePersonData;
+      
+      try {
+        completePersonData = await fetchCompletePersonData(personId, isGuest, 3);
+      } catch (fetchError) {
+        console.warn('⚠️ Using scan process data as fallback:', fetchError.message);
+        // Use scan process data as fallback
+        completePersonData = scanResult.person;
+      }
+
+      console.log('✅ PERSON DATA FOR DISPLAY:', completePersonData);
+
+      // Step 3: Generate display data with multiple fallbacks
+      const displayData = generateDisplayData(completePersonData, scanResult, confidence, isGuest);
+      
+      console.log('🎯 FINAL DISPLAY DATA:', displayData);
+      
+      setScannedPerson(displayData);
+      
+      // Close scanner and show modal
+      if (activeTab === 'camera') {
+        stopScanner();
+        onHide();
+      }
+      
+      setTimeout(() => {
+        setShowPersonModal(true);
+        setIsValidatingScan(false);
+        setScanSuccess(false);
+        setIsProcessingUpload(false);
+        setUploadProgress(0);
+      }, 400);
+
+    } catch (error) {
+      console.error('❌ ERROR PROCESSING QR SCAN:', error);
+      
+      let errorMessage = 'Failed to process QR code.';
+      
+      if (error.response?.status === 404) {
+        errorMessage = `${isGuest ? 'Guest' : 'Visitor'} not found in database.`;
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      setScanError(errorMessage);
+      setIsValidatingScan(false);
+      setScanSuccess(false);
+      setIsProcessingUpload(false);
+      setUploadProgress(0);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // BULLETPROOF: Generate display data with multiple fallbacks
+  const generateDisplayData = (personData, scanResult, confidence, isGuest) => {
+    // Start with scan result data as base
+    const baseData = scanResult.person || {};
+    
+    // Merge with complete person data (prioritize complete data)
+    const mergedData = {
+      ...baseData,
+      ...personData,
+      // Ensure critical fields are always present
+      id: personData.id || baseData.id || scanResult.personId,
+      personType: isGuest ? 'guest' : 'visitor',
+      scanType: scanResult.scanType,
+      scanMessage: scanResult.message,
+      scanConfidence: confidence
+    };
+
+    // Generate full name with multiple fallbacks
+    mergedData.fullName = generateFullName(mergedData);
+
+    // Ensure required fields have fallbacks
+    const safeData = {
+      ...mergedData,
+      sex: mergedData.sex || 'Not specified',
+      address: mergedData.address || 'Not specified',
+      contact: mergedData.contact || 'Not available',
+      dateOfBirth: mergedData.dateOfBirth || null,
+      // Visitor specific - UPDATED: Use prisonerName instead of prisonerId
+      prisonerName: mergedData.prisonerName || 'Not specified',
+      relationship: mergedData.relationship || 'Not specified',
+      // Guest specific  
+      visitPurpose: mergedData.visitPurpose || 'Not specified',
+      // Time tracking with fallbacks
+      hasTimedIn: mergedData.hasTimedIn || false,
+      hasTimedOut: mergedData.hasTimedOut || false,
+      timeIn: mergedData.timeIn || null,
+      timeOut: mergedData.timeOut || null,
+      lastVisitDate: mergedData.lastVisitDate || null,
+      // Violation and ban info
+      violationType: mergedData.violationType || null,
+      violationDetails: mergedData.violationDetails || null,
+      isBanned: mergedData.isBanned || false,
+      banReason: mergedData.banReason || null,
+      banDuration: mergedData.banDuration || null,
+      banNotes: mergedData.banNotes || null
+    };
+
+    console.log('🛡️ SAFE DISPLAY DATA GENERATED:', safeData);
+    return safeData;
   };
 
   // Generate full name from individual name fields
   const generateFullName = (person) => {
-    if (!person) return 'Unknown';
+    if (!person) return 'Unknown Person';
     
-    // If fullName exists, use it
-    if (person.fullName) return person.fullName;
+    // Priority 1: Use existing fullName
+    if (person.fullName && person.fullName !== 'Unknown') return person.fullName;
     
-    // Otherwise generate from individual fields
+    // Priority 2: Use name field
+    if (person.name && person.name !== 'Unknown') return person.name;
+    
+    // Priority 3: Construct from individual fields
     const { lastName, firstName, middleName, extension } = person;
-    let fullName = `${lastName || ''}, ${firstName || ''}`;
-    if (middleName) fullName += ` ${middleName}`;
-    if (extension) fullName += ` ${extension}`;
     
-    return fullName.trim() || 'Unknown Name';
+    if (lastName || firstName) {
+      let fullName = `${lastName || ''}, ${firstName || ''}`.trim();
+      if (middleName) fullName += ` ${middleName}`;
+      if (extension) fullName += ` ${extension}`;
+      return fullName || 'Unknown Name';
+    }
+    
+    // Priority 4: Use ID as fallback
+    return `Person ${person.id || 'Unknown'}`;
   };
 
   // Detect if the scanned person is a guest or visitor
@@ -354,110 +541,6 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     return 'visitor';
   };
 
-  const debouncedHandleScan = debounce(async (qrData, confidence) => {
-    if (isLoading || qrData === lastScannedCode) return;
-    
-    let personId;
-    let isGuest = false;
-    
-    try {
-      setIsLoading(true);
-      setScanError(null);
-      setLastScannedCode(qrData);
-      setRetryCount(0);
-
-      try {
-        const parsedData = JSON.parse(qrData);
-        personId = parsedData.id || parsedData.visitorId;
-        isGuest = detectPersonType(qrData) === 'guest';
-      } catch (e) {
-        personId = qrData;
-        isGuest = detectPersonType(qrData) === 'guest';
-      }
-
-      if (!personId) {
-        setScanError('Invalid QR code format.');
-        setIsLoading(false);
-        setIsValidatingScan(false);
-        setScanSuccess(false);
-        setIsProcessingUpload(false);
-        setUploadProgress(0);
-        return;
-      }
-
-      // Use the scan-process endpoint to get person data and scan type
-      const scanResponse = await axios.post("http://localhost:5000/scan-process", {
-        qrData: qrData,
-        personId: personId,
-        isGuest: isGuest
-      });
-
-      const scanResult = scanResponse.data;
-      console.log('📊 Scan process result:', scanResult);
-
-      if (!scanResult.person) {
-        setScanError(`${isGuest ? 'Guest' : 'Visitor'} not found in database.`);
-        setIsLoading(false);
-        setIsValidatingScan(false);
-        setScanSuccess(false);
-        setIsProcessingUpload(false);
-        setUploadProgress(0);
-        return;
-      }
-
-      // Refresh person data to ensure we have complete details
-      const completePersonData = await refreshPersonData(personId, isGuest ? 'guest' : 'visitor');
-      
-      // Generate full name if it doesn't exist
-      const personWithFullName = {
-        ...(completePersonData || scanResult.person),
-        fullName: generateFullName(completePersonData || scanResult.person)
-      };
-
-      // Set scanned person with complete data and scan type from backend
-      setScannedPerson({
-        ...personWithFullName,
-        personType: isGuest ? 'guest' : 'visitor',
-        scanType: scanResult.scanType,
-        scanMessage: scanResult.message,
-        scanConfidence: confidence
-      });
-      
-      if (activeTab === 'camera') {
-        stopScanner();
-        onHide();
-      }
-      
-      setTimeout(() => {
-        setShowPersonModal(true);
-        setIsValidatingScan(false);
-        setScanSuccess(false);
-        setIsProcessingUpload(false);
-        setUploadProgress(0);
-      }, 500);
-
-    } catch (error) {
-      console.error('❌ Error processing QR scan:', error);
-      let errorMessage = 'Failed to process QR code.';
-      
-      if (error.response?.status === 404) {
-        errorMessage = `${isGuest ? 'Guest' : 'Visitor'} not found in database.`;
-      } else if (error.response?.data?.message) {
-        errorMessage = error.response.data.message;
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
-      
-      setScanError(errorMessage);
-      setIsValidatingScan(false);
-      setScanSuccess(false);
-      setIsProcessingUpload(false);
-      setUploadProgress(0);
-    } finally {
-      setIsLoading(false);
-    }
-  }, 1000);
-
   const handleApproveVisit = async () => {
     if (!scannedPerson) return;
 
@@ -470,48 +553,38 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
         ? `http://localhost:5000/${personType}s/${scannedPerson.id}/approve-time-in`
         : `http://localhost:5000/${personType}s/${scannedPerson.id}/approve-time-out`;
 
-      console.log('📞 Calling:', endpoint);
+      console.log('📞 CALLING:', endpoint);
 
       const response = await axios.put(endpoint);
       console.log('✅ BACKEND RESPONSE:', response.data);
 
-      // REFRESH: Get complete person data after approval
-      const freshPersonData = await refreshPersonData(scannedPerson.id, personType);
+      // BULLETPROOF: Get complete updated person data with retry
+      console.log('🔄 FETCHING UPDATED PERSON DATA...');
+      let updatedPersonData;
       
-      let updatedPersonData = freshPersonData || scannedPerson; // Fallback to original if refresh fails
-
-      // If refresh failed, try to extract from response
-      if (!freshPersonData) {
-        if (response.data.guest) {
-          updatedPersonData = response.data.guest;
-        } else if (response.data.visitor) {
-          updatedPersonData = response.data.visitor;
-        } else if (response.data[personType]) {
-          updatedPersonData = response.data[personType];
-        } else {
-          updatedPersonData = response.data;
-        }
+      try {
+        updatedPersonData = await fetchCompletePersonData(scannedPerson.id, personType === 'guest', 2);
+      } catch (fetchError) {
+        console.warn('⚠️ Using response data as fallback:', fetchError.message);
+        // Fallback to response data
+        updatedPersonData = response.data[personType] || response.data.guest || response.data.visitor || response.data;
       }
 
-      // Generate full name for the updated data
-      const updatedPersonWithFullName = {
-        ...updatedPersonData,
-        fullName: generateFullName(updatedPersonData)
-      };
+      console.log('✅ UPDATED PERSON DATA:', updatedPersonData);
 
-      // FIXED: Proper merge with all original data preserved
-      const updatedPerson = {
-        ...scannedPerson, // Original complete data
-        ...updatedPersonWithFullName, // Updated fields from backend
-        // Ensure scan status is updated
-        scanType: scannedPerson.scanType === 'time_in_pending' ? 'time_in_approved' : 'time_out_approved',
-        scanMessage: response.data.message || 'Operation completed successfully',
-        // Preserve the scan confidence
-        scanConfidence: scannedPerson.scanConfidence
-      };
+      // Generate updated display data
+      const updatedDisplayData = generateDisplayData(
+        updatedPersonData, 
+        { 
+          scanType: scannedPerson.scanType === 'time_in_pending' ? 'time_in_approved' : 'time_out_approved',
+          message: response.data.message || 'Operation completed successfully'
+        }, 
+        scannedPerson.scanConfidence, 
+        personType === 'guest'
+      );
 
-      console.log('✅ FINAL UPDATED PERSON WITH COMPLETE DATA:', updatedPerson);
-      setScannedPerson(updatedPerson);
+      console.log('✅ FINAL UPDATED PERSON:', updatedDisplayData);
+      setScannedPerson(updatedDisplayData);
       
       if (onVisitUpdate) {
         onVisitUpdate();
@@ -533,7 +606,6 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
   };
 
   const handleDeclineVisit = () => {
-    // Simply close the modal without making any API calls
     setScannedPerson({
       ...scannedPerson,
       scanType: 'declined',
@@ -553,7 +625,6 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     setIsProcessingUpload(false);
     setUploadProgress(0);
     
-    // NEW: Close the entire scanner when person modal is closed
     handleCloseScanner();
   };
 
@@ -590,24 +661,20 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     fileInputRef.current?.click();
   };
 
-  const clearUpload = () => {
-    setUploadedImage(null);
-    setScanError(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
-
   const calculateAge = (dateOfBirth) => {
     if (!dateOfBirth) return 'N/A';
-    const birthDate = new Date(dateOfBirth);
-    const today = new Date();
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
+    try {
+      const birthDate = new Date(dateOfBirth);
+      const today = new Date();
+      let age = today.getFullYear() - birthDate.getFullYear();
+      const monthDiff = today.getMonth() - birthDate.getMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+        age--;
+      }
+      return age;
+    } catch (e) {
+      return 'N/A';
     }
-    return age;
   };
 
   const getTimeStatus = (person) => {
@@ -630,8 +697,20 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
     }
   };
 
+  // UPDATED: Show approval buttons only if not banned
   const showApprovalButtons = () => {
-    return scannedPerson && (scannedPerson.scanType === 'time_in_pending' || scannedPerson.scanType === 'time_out_pending');
+    if (!scannedPerson) return false;
+    
+    // If person is banned, only show reject button
+    if (scannedPerson.isBanned) return false;
+    
+    return scannedPerson.scanType === 'time_in_pending' || scannedPerson.scanType === 'time_out_pending';
+  };
+
+  // NEW: Show only reject button for banned persons
+  const showRejectButtonOnly = () => {
+    return scannedPerson && scannedPerson.isBanned && 
+           (scannedPerson.scanType === 'time_in_pending' || scannedPerson.scanType === 'time_out_pending');
   };
 
   const showCompletedMessage = () => {
@@ -645,38 +724,70 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       return timeString;
     }
     
-    if (timeString.includes(':')) {
-      const [hours, minutes] = timeString.split(':');
-      const hour = parseInt(hours);
-      const ampm = hour >= 12 ? 'PM' : 'AM';
-      const twelveHour = hour % 12 || 12;
-      return `${twelveHour}:${minutes} ${ampm}`;
+    try {
+      if (timeString.includes(':')) {
+        const [hours, minutes] = timeString.split(':');
+        const hour = parseInt(hours);
+        const ampm = hour >= 12 ? 'PM' : 'AM';
+        const twelveHour = hour % 12 || 12;
+        return `${twelveHour}:${minutes} ${ampm}`;
+      }
+    } catch (e) {
+      console.warn('Time format error:', e);
     }
     
     return timeString;
   };
 
-  // Render different content based on person type
+  // UPDATED: Show complete personal details for banned persons, just without the separate violation table
   const renderPersonDetails = () => {
-    if (!scannedPerson) return null;
+    if (!scannedPerson) {
+      return (
+        <Alert variant="warning" className="text-center">
+          <Spinner animation="border" size="sm" className="me-2" />
+          Loading person details...
+        </Alert>
+      );
+    }
 
     const isGuest = scannedPerson.personType === 'guest';
     const displayName = scannedPerson.fullName || generateFullName(scannedPerson);
+    const timeStatus = getTimeStatus(scannedPerson);
 
     return (
       <>
+        {/* BANNED ALERT - Show prominent warning if person is banned */}
+        {scannedPerson.isBanned && (
+          <Alert variant="danger" className="mb-4">
+            <div className="text-center">
+              <h5>🚫 <strong>BANNED {isGuest ? 'GUEST' : 'VISITOR'}</strong></h5>
+              <p className="mb-1"><strong>Reason:</strong> {scannedPerson.banReason || 'Not specified'}</p>
+              <p className="mb-1"><strong>Duration:</strong> {scannedPerson.banDuration || 'Not specified'}</p>
+              {scannedPerson.banNotes && (
+                <p className="mb-0"><strong>Notes:</strong> {scannedPerson.banNotes}</p>
+              )}
+            </div>
+          </Alert>
+        )}
+
         <Alert variant={getScanAlertVariant(scannedPerson.scanType)} className="mb-4">
           <strong>
-            {scannedPerson.scanType === 'time_in_pending' ? `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME IN REQUEST - AWAITING APPROVAL` : 
-             scannedPerson.scanType === 'time_out_pending' ? `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME OUT REQUEST - AWAITING APPROVAL` : 
-             scannedPerson.scanType === 'time_in_approved' ? `✅ ${isGuest ? 'GUEST' : 'VISITOR'} TIME IN APPROVED - ${isGuest ? 'VISIT STARTED' : 'TIMER STARTED'}` : 
-             scannedPerson.scanType === 'time_out_approved' ? `✅ ${isGuest ? 'GUEST' : 'VISITOR'} TIME OUT APPROVED - VISIT COMPLETED` : 
-             scannedPerson.scanType === 'completed' ? `✅ ${isGuest ? 'GUEST' : 'VISITOR'} VISIT COMPLETED TODAY` : 
-             scannedPerson.scanType === 'declined' ? `❌ ${isGuest ? 'GUEST' : 'VISITOR'} VISIT DECLINED` : 
+            {scannedPerson.scanType === 'time_in_pending' ? 
+              `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME IN REQUEST - AWAITING APPROVAL` : 
+             scannedPerson.scanType === 'time_out_pending' ? 
+              `🕒 ${isGuest ? 'GUEST' : 'VISITOR'} TIME OUT REQUEST - AWAITING APPROVAL` : 
+             scannedPerson.scanType === 'time_in_approved' ? 
+              `✅ ${isGuest ? 'GUEST' : 'VISITOR'} TIME IN APPROVED - ${isGuest ? 'VISIT STARTED' : 'TIMER STARTED'}` : 
+             scannedPerson.scanType === 'time_out_approved' ? 
+              `✅ ${isGuest ? 'GUEST' : 'VISITOR'} TIME OUT APPROVED - VISIT COMPLETED` : 
+             scannedPerson.scanType === 'completed' ? 
+              `✅ ${isGuest ? 'GUEST' : 'VISITOR'} VISIT COMPLETED TODAY` : 
+             scannedPerson.scanType === 'declined' ? 
+              `❌ ${isGuest ? 'GUEST' : 'VISITOR'} VISIT DECLINED` : 
              '❌ SCAN ERROR'}
           </strong>
           <br />
-          {scannedPerson.scanMessage}
+          {scannedPerson.scanMessage || 'Processing scan...'}
           {scannedPerson.scanConfidence && (
             <div className="mt-1">
               <small>Scan Quality: <Badge bg="info">{scannedPerson.scanConfidence}%</Badge></small>
@@ -692,6 +803,7 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
         <Row className="mb-4">
           <Col className="text-center">
             <div className="mb-3">
+              {/* UPDATED: Only show actual image, no fallback icon */}
               {scannedPerson.photo ? (
                 <Image 
                   src={`http://localhost:5000/uploads/${scannedPerson.photo}`} 
@@ -701,41 +813,39 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
                   rounded
                   style={{ 
                     objectFit: 'cover',
-                    border: '4px solid #dee2e6',
-                    boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
+                    border: scannedPerson.isBanned ? '4px solid #dc3545' : '4px solid #dee2e6',
+                    boxShadow: scannedPerson.isBanned ? '0 4px 8px rgba(220, 53, 69, 0.3)' : '0 4px 8px rgba(0,0,0,0.1)'
                   }}
                   className="mb-2"
+                  onError={(e) => {
+                    // If image fails to load, show nothing (no fallback icon)
+                    e.target.style.display = 'none';
+                  }}
                 />
               ) : (
-                <div 
-                  className="d-flex align-items-center justify-content-center bg-light rounded mx-auto"
-                  style={{ 
-                    width: 200, 
-                    height: 200,
-                    border: '4px solid #dee2e6'
-                  }}
-                >
-                  <User size={64} className="text-muted" />
-                </div>
+                // If no photo, show nothing (empty space)
+                <div style={{ height: '200px' }}></div>
               )}
             </div>
             <h4 className="mb-1">{displayName}</h4>
             <div>
-              {/* REMOVED: Status badge (approved/rejected) */}
+              {/* UPDATED: Only show person type badge, remove status badges for banned persons */}
               <Badge bg={isGuest ? 'info' : 'primary'} className="fs-6">
                 {isGuest ? 'GUEST' : 'VISITOR'}
               </Badge>
+              {/* REMOVED: Status badges (Not Checked In, Banned, etc.) */}
             </div>
             <div className="mt-2">
-              <small className="text-muted">ID: {scannedPerson.id}</small>
+              <small className="text-muted">ID: {scannedPerson.id || 'Unknown'}</small>
             </div>
           </Col>
         </Row>
 
         <Row>
+          {/* ALWAYS SHOW TIME TRACKING INFORMATION */}
           <Col md={12}>
             <Card className="mb-4">
-              <Card.Header>
+              <Card.Header className={scannedPerson.isBanned ? "bg-danger text-white" : ""}>
                 <strong>Time Tracking Information</strong>
               </Card.Header>
               <Card.Body>
@@ -743,11 +853,11 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
                   <Col md={6}>
                     <p><strong>Last Visit Date:</strong> {scannedPerson.lastVisitDate ? new Date(scannedPerson.lastVisitDate).toLocaleDateString() : 'No previous visits'}</p>
                     <p><strong>Time In:</strong> {scannedPerson.timeIn ? <Badge bg="success" className="fs-6">{formatTimeDisplay(scannedPerson.timeIn)}</Badge> : 'Not recorded'}</p>
-                    <p><strong>Date Visited:</strong> {scannedPerson.dateVisited ? new Date(scannedPerson.dateVisited).toLocaleDateString() : 'N/A'}</p>
+        
                   </Col>
                   <Col md={6}>
                     <p><strong>Time Out:</strong> {scannedPerson.timeOut ? <Badge bg="info" className="fs-6">{formatTimeDisplay(scannedPerson.timeOut)}</Badge> : 'Not recorded'}</p>
-                    <p><strong>Time Status:</strong> <Badge bg={getTimeStatus(scannedPerson).variant} className="fs-6">{getTimeStatus(scannedPerson).text}</Badge></p>
+                    <p><strong>Visit Status:</strong> <Badge bg={timeStatus.variant} className="fs-6">{timeStatus.text}</Badge></p>
                     {!isGuest && scannedPerson.isTimerActive && (
                       <p><strong>Timer Active:</strong> <Badge bg="warning" className="fs-6">YES</Badge></p>
                     )}
@@ -757,64 +867,77 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
             </Card>
           </Col>
 
+          {/* ALWAYS SHOW PERSONAL INFORMATION */}
           <Col md={6}>
             <Card className="mb-3">
-              <Card.Header>
+              <Card.Header className={scannedPerson.isBanned ? "bg-danger text-white" : ""}>
                 <strong>Personal Information</strong>
               </Card.Header>
               <Card.Body>
                 <p><strong>Full Name:</strong> {displayName}</p>
-                <p><strong>Gender:</strong> {scannedPerson.sex}</p>
+                <p><strong>Gender:</strong> {scannedPerson.sex || 'Not specified'}</p>
                 <p><strong>Date of Birth:</strong> {scannedPerson.dateOfBirth ? new Date(scannedPerson.dateOfBirth).toLocaleDateString() : 'N/A'}</p>
                 <p><strong>Age:</strong> {calculateAge(scannedPerson.dateOfBirth)}</p>
-                <p><strong>Address:</strong> {scannedPerson.address}</p>
-                <p><strong>Contact:</strong> {scannedPerson.contact || 'N/A'}</p>
+                <p><strong>Address:</strong> {scannedPerson.address || 'Not specified'}</p>
+                <p><strong>Contact:</strong> {scannedPerson.contact || 'Not available'}</p>
               </Card.Body>
             </Card>
           </Col>
           
+          {/* ALWAYS SHOW VISIT/GUEST DETAILS */}
           <Col md={6}>
             <Card className="mb-3">
-              <Card.Header>
+              <Card.Header className={scannedPerson.isBanned ? "bg-danger text-white" : ""}>
                 <strong>{isGuest ? 'Guest Details' : 'Visit Details'}</strong>
               </Card.Header>
               <Card.Body>
                 {isGuest ? (
                   <>
-                    <p><strong>Visit Purpose:</strong> {scannedPerson.visitPurpose}</p>
-                    {/* REMOVED: Created At field */}
+                    <p><strong>Visit Purpose:</strong> {scannedPerson.visitPurpose || 'Not specified'}</p>
                   </>
                 ) : (
                   <>
-                    <p><strong>Prisoner ID:</strong> {scannedPerson.prisonerId}</p>
-                    <p><strong>Relationship:</strong> {scannedPerson.relationship}</p>
-                    {/* REMOVED: Visit Approved field */}
+                    {/* UPDATED: Show only Prisoner Name (no Prisoner ID) */}
+                    <p><strong>Inmate Name:</strong> {scannedPerson.prisonerName || 'Not specified'}</p>
+                    <p><strong>Relationship:</strong> {scannedPerson.relationship || 'Not specified'}</p>
                   </>
                 )}
               </Card.Body>
             </Card>
             
-            {scannedPerson.violationType && (
-              <Card className="mb-3 border-danger">
-                <Card.Header className="bg-danger text-white">
-                  <strong>Violation Information</strong>
-                </Card.Header>
-                <Card.Body>
-                  <p><strong>Violation Type:</strong> {scannedPerson.violationType}</p>
-                  <p><strong>Violation Details:</strong> {scannedPerson.violationDetails || 'No violation data'}</p>
-                </Card.Body>
-              </Card>
-            )}
-
+            {/* SHOW BAN INFORMATION FOR BANNED PERSONS */}
             {scannedPerson.isBanned && (
               <Card className="mb-3 border-warning">
                 <Card.Header className="bg-warning text-dark">
                   <strong>Ban Information</strong>
                 </Card.Header>
                 <Card.Body>
-                  <p><strong>Ban Reason:</strong> {scannedPerson.banReason}</p>
-                  <p><strong>Ban Duration:</strong> {scannedPerson.banDuration}</p>
-                  <p><strong>Ban Notes:</strong> {scannedPerson.banNotes || 'No additional notes'}</p>
+                  <Row>
+                    <Col md={6}>
+                      <p><strong>Ban Reason:</strong> {scannedPerson.banReason || 'Not specified'}</p>
+                      <p><strong>Ban Duration:</strong> {scannedPerson.banDuration || 'Not specified'}</p>
+                    </Col>
+                    <Col md={6}>
+                      <p><strong>Ban Notes:</strong> {scannedPerson.banNotes || 'No additional notes'}</p>
+                    </Col>
+                  </Row>
+                  {scannedPerson.violationDetails && (
+                    <Row>
+                    </Row>
+                  )}
+                </Card.Body>
+              </Card>
+            )}
+            
+            {/* SHOW VIOLATION INFORMATION ONLY FOR NON-BANNED PERSONS WITH VIOLATIONS */}
+            {!scannedPerson.isBanned && scannedPerson.violationType && (
+              <Card className="mb-3 border-danger">
+                <Card.Header className="bg-danger text-white">
+                  <strong>Violation Information</strong>
+                </Card.Header>
+                <Card.Body>
+                  <p><strong>Violation Type:</strong> {scannedPerson.violationType}</p>
+                  <p><strong>Violation Details:</strong> {scannedPerson.violationDetails || 'No additional details'}</p>
                 </Card.Body>
               </Card>
             )}
@@ -862,7 +985,6 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
                     border: scanSuccess ? '3px solid #28a745' : '2px solid #dee2e6',
                     borderRadius: '8px',
                     backgroundColor: '#000',
-                    // Transform is now handled dynamically in initializeScanner
                   }}
                 ></video>
                 
@@ -1050,18 +1172,37 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
       </Modal>
 
       <Modal show={showPersonModal} onHide={handleClosePersonModal} size="xl" centered>
-        <Modal.Header closeButton>
+        <Modal.Header closeButton className={scannedPerson?.isBanned ? "bg-danger text-white" : ""}>
           <Modal.Title>
-            {scannedPerson?.personType === 'guest' ? 'Guest' : 'Visitor'} Scan Details - {scannedPerson?.id} 
+            {scannedPerson?.personType === 'guest' ? 'Guest' : 'Visitor'} Scan Details - {scannedPerson?.id || 'Unknown'} 
             <Badge bg={getScanAlertVariant(scannedPerson?.scanType)} className="ms-2">
               {scannedPerson?.scanType?.replace(/_/g, ' ').toUpperCase() || 'SCAN'}
             </Badge>
+            {scannedPerson?.isBanned && (
+              <Badge bg="danger" className="ms-2">
+                BANNED
+              </Badge>
+            )}
           </Modal.Title>
         </Modal.Header>
         <Modal.Body>
           {renderPersonDetails()}
         </Modal.Body>
         <Modal.Footer>
+          {/* UPDATED: Show only reject button for banned persons */}
+          {showRejectButtonOnly() && (
+            <Button 
+              variant="danger" 
+              onClick={handleDeclineVisit}
+              disabled={isApproving}
+              size="lg"
+            >
+              <XCircle size={18} className="me-1" />
+              {isApproving ? 'Declining...' : 'Reject Banned Person'}
+            </Button>
+          )}
+          
+          {/* Show both buttons for non-banned persons */}
           {showApprovalButtons() && (
             <>
               <Button 
@@ -1084,6 +1225,7 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
               </Button>
             </>
           )}
+          
           {showCompletedMessage() && (
             <Button variant="secondary" onClick={handleClosePersonModal} size="lg">
               Close

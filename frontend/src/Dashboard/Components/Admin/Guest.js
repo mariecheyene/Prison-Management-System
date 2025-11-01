@@ -48,9 +48,17 @@ const Guest = () => {
   // Define the functions that were causing ESLint errors
   const exportToCSV = () => {
     const headers = [
-      'Guest ID', 'Last Name', 'First Name', 'Middle Name', 'Extension',
-      'Date of Birth', 'Age', 'Gender', 'Address', 'Contact',
-      'Visit Purpose', 'Status', 'Violation Type', 'Violation Details', 'Date Visited', 'Time In', 'Time Out'
+      'Guest ID', 
+      'Last Name', 
+      'First Name', 
+      'Middle Name', 
+      'Extension',
+      'Date of Birth', 
+      'Age', 
+      'Gender', 
+      'Address', 
+      'Contact',
+      'Visit Purpose'
     ];
 
     const csvData = guests.map(guest => [
@@ -64,13 +72,7 @@ const Guest = () => {
       guest.sex,
       guest.address,
       guest.contact,
-      guest.visitPurpose,
-      guest.status || 'approved',
-      guest.violationType || 'No violation',
-      guest.violationDetails || 'No violation data',
-      guest.dateVisited ? new Date(guest.dateVisited).toLocaleDateString() : 'Not visited',
-      guest.timeIn || 'Not recorded',
-      guest.timeOut || 'Not recorded'
+      guest.visitPurpose
     ]);
 
     const csvContent = [headers, ...csvData]
@@ -90,14 +92,22 @@ const Guest = () => {
 
   const downloadTemplate = () => {
     const templateHeaders = [
-      'lastName', 'firstName', 'middleName', 'extension', 
-      'dateOfBirth', 'sex', 'address', 'contact', 'visitPurpose'
+      'Last Name', 
+      'First Name', 
+      'Middle Name', 
+      'Extension', 
+      'Date of Birth', 
+      'Gender', 
+      'Address', 
+      'Contact', 
+      'Visit Purpose'
     ];
 
     const templateData = [
       templateHeaders,
       ['Doe', 'John', 'Michael', 'Jr', '1990-05-15', 'Male', '123 Main St, City, State', '09123456789', 'Official Business'],
-      ['Smith', 'Jane', 'Marie', '', '1985-08-22', 'Female', '456 Oak Ave, City, State', '09987654321', 'Meeting']
+      ['Smith', 'Jane', 'Marie', '', '1985-08-22', 'Female', '456 Oak Ave, City, State', '09987654321', 'Meeting'],
+      ['Garcia', 'Juan', 'Santos', 'III', '1978-12-10', 'Male', '789 Pine Rd, City, State', '09112233445', 'Interview']
     ];
 
     const csvContent = templateData
@@ -112,7 +122,7 @@ const Guest = () => {
     link.click();
     window.URL.revokeObjectURL(url);
     
-    toast.success('Template downloaded successfully!');
+    toast.success('Guest import template downloaded successfully!');
   };
 
   useEffect(() => {
@@ -1066,11 +1076,28 @@ const Guest = () => {
       </Modal>
 
       {/* Import Modal */}
-      <Modal show={showImportModal} onHide={() => setShowImportModal(false)}>
+<Modal show={showImportModal} onHide={() => setShowImportModal(false)} size="lg" centered>
         <Modal.Header closeButton>
           <Modal.Title>Import Guests from CSV</Modal.Title>
         </Modal.Header>
         <Modal.Body>
+          <Alert variant="info" className="mb-4">
+            <strong>CSV Format Requirements:</strong>
+            <br />
+            Your CSV file should include these columns in the header row:
+            <ul className="mb-0 mt-2">
+              <li><strong>Last Name</strong> (required)</li>
+              <li><strong>First Name</strong> (required)</li>
+              <li><strong>Middle Name</strong> (optional)</li>
+              <li><strong>Extension</strong> (optional - Jr, Sr, III)</li>
+              <li><strong>Date of Birth</strong> (required - YYYY-MM-DD or MM/DD/YYYY)</li>
+              <li><strong>Gender</strong> (required - Male or Female)</li>
+              <li><strong>Address</strong> (required)</li>
+              <li><strong>Contact</strong> (required)</li>
+              <li><strong>Visit Purpose</strong> (required - e.g., Official Business, Meeting, Interview)</li>
+            </ul>
+          </Alert>
+
           <Form.Group>
             <Form.Label>Select CSV File</Form.Label>
             <Form.Control
@@ -1079,9 +1106,17 @@ const Guest = () => {
               onChange={handleImportFileChange}
             />
             <Form.Text className="text-muted">
-              CSV should include columns: lastName, firstName, middleName, extension, dateOfBirth, sex, address, contact, visitPurpose
+              CSV file should have headers matching the format above. File will be processed immediately after selection.
             </Form.Text>
           </Form.Group>
+
+          {importFile && (
+            <Alert variant="success" className="mt-3">
+              <strong>File selected:</strong> {importFile.name}
+              <br />
+              <small>Ready to upload. Click "Import CSV" to proceed.</small>
+            </Alert>
+          )}
 
           {isImporting && (
             <div className="mb-3 mt-3">
@@ -1097,21 +1132,20 @@ const Guest = () => {
               </div>
             </div>
           )}
-
-          <div className="d-flex justify-content-between align-items-center mt-4">
-            <Button variant="outline-secondary" size="sm" onClick={downloadTemplate}>
-              Download Template
-            </Button>
-            <div className="text-muted small">
-              Need help with the format?
-            </div>
-          </div>
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowImportModal(false)}>
+          <Button variant="secondary" onClick={() => {
+            setShowImportModal(false);
+            setImportFile(null);
+            setImportProgress(0);
+          }}>
             Cancel
           </Button>
-          <Button variant="dark" onClick={handleImport} disabled={!importFile || isImporting}>
+          <Button 
+            variant="dark" 
+            onClick={handleImport} 
+            disabled={!importFile || isImporting}
+          >
             {isImporting ? (
               <>
                 <Spinner size="sm" className="me-2" />

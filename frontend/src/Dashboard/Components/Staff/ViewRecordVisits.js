@@ -13,7 +13,6 @@ import {
   Calendar,
   Download,
   User,
-  Trash2,
   AlertTriangle,
   Slash,
   Edit,
@@ -39,7 +38,6 @@ const ViewRecordVisits = () => {
   const [searchBy, setSearchBy] = useState('personName');
 
   // Modal states
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showViolationModal, setShowViolationModal] = useState(false);
   const [showBanModal, setShowBanModal] = useState(false);
@@ -172,85 +170,85 @@ const ViewRecordVisits = () => {
   };
 
   const fetchViolators = async () => {
-  try {
-    const [visitorsRes, guestsRes] = await Promise.all([
-      axios.get(`${API_BASE}/visitors`),
-      axios.get(`${API_BASE}/guests`)
-    ]);
-    
-    // Only show violators who are NOT banned and have violations
-    const visitorsWithViolations = visitorsRes.data
-      .filter(visitor => 
-        visitor.violationType && 
-        visitor.violationType !== 'Ban' && 
-        visitor.isBanned !== true
-      )
-      .map(visitor => ({
-        ...visitor,
-        personType: 'visitor',
-        personName: visitor.fullName,
-        id: visitor.id
-      }));
-    
-    const guestsWithViolations = guestsRes.data
-      .filter(guest => 
-        guest.violationType && 
-        guest.violationType !== 'Ban' && 
-        guest.isBanned !== true
-      )
-      .map(guest => ({
-        ...guest,
-        personType: 'guest',
-        personName: guest.fullName,
-        id: guest.id
-      }));
-    
-    const allViolators = [...visitorsWithViolations, ...guestsWithViolations];
-    setViolators(allViolators);
-  } catch (error) {
-    console.error('Error fetching violators:', error);
-    toast.error('Failed to fetch violators');
-  }
-};
+    try {
+      const [visitorsRes, guestsRes] = await Promise.all([
+        axios.get(`${API_BASE}/visitors`),
+        axios.get(`${API_BASE}/guests`)
+      ]);
+      
+      // Only show violators who are NOT banned and have violations
+      const visitorsWithViolations = visitorsRes.data
+        .filter(visitor => 
+          visitor.violationType && 
+          visitor.violationType.trim() !== '' &&
+          visitor.isBanned !== true
+        )
+        .map(visitor => ({
+          ...visitor,
+          personType: 'visitor',
+          personName: visitor.fullName,
+          id: visitor.id
+        }));
+      
+      const guestsWithViolations = guestsRes.data
+        .filter(guest => 
+          guest.violationType && 
+          guest.violationType.trim() !== '' &&
+          guest.isBanned !== true
+        )
+        .map(guest => ({
+          ...guest,
+          personType: 'guest',
+          personName: guest.fullName,
+          id: guest.id
+        }));
+      
+      const allViolators = [...visitorsWithViolations, ...guestsWithViolations];
+      setViolators(allViolators);
+    } catch (error) {
+      console.error('Error fetching violators:', error);
+      toast.error('Failed to fetch violators');
+    }
+  };
 
   const fetchBanned = async () => {
-  try {
-    const [visitorsRes, guestsRes] = await Promise.all([
-      axios.get(`${API_BASE}/visitors`),
-      axios.get(`${API_BASE}/guests`)
-    ]);
-    
-    // ONLY check isBanned field, completely separate from violations
-    const bannedVisitors = visitorsRes.data
-      .filter(visitor => visitor.isBanned === true)
-      .map(visitor => ({
-        ...visitor,
-        personType: 'visitor',
-        personName: visitor.fullName,
-        id: visitor.id,
-        banReason: visitor.banReason || 'Administrative ban',
-        banDuration: visitor.banDuration || 'permanent'
-      }));
-    
-    const bannedGuests = guestsRes.data
-      .filter(guest => guest.isBanned === true)
-      .map(guest => ({
-        ...guest,
-        personType: 'guest',
-        personName: guest.fullName,
-        id: guest.id,
-        banReason: guest.banReason || 'Administrative ban',
-        banDuration: guest.banDuration || 'permanent'
-      }));
-    
-    const allBanned = [...bannedVisitors, ...bannedGuests];
-    console.log('✅ Fetched banned persons:', allBanned.length);
-    setBanned(allBanned);
-  } catch (error) {
-    console.error('Error fetching banned persons:', error);
-    toast.error('Failed to fetch banned persons');
-  }
-};
+    try {
+      const [visitorsRes, guestsRes] = await Promise.all([
+        axios.get(`${API_BASE}/visitors`),
+        axios.get(`${API_BASE}/guests`)
+      ]);
+      
+      // ONLY check isBanned field, completely separate from violations
+      const bannedVisitors = visitorsRes.data
+        .filter(visitor => visitor.isBanned === true)
+        .map(visitor => ({
+          ...visitor,
+          personType: 'visitor',
+          personName: visitor.fullName,
+          id: visitor.id,
+          banReason: visitor.banReason || 'Administrative ban',
+          banDuration: visitor.banDuration || 'permanent'
+        }));
+      
+      const bannedGuests = guestsRes.data
+        .filter(guest => guest.isBanned === true)
+        .map(guest => ({
+          ...guest,
+          personType: 'guest',
+          personName: guest.fullName,
+          id: guest.id,
+          banReason: guest.banReason || 'Administrative ban',
+          banDuration: guest.banDuration || 'permanent'
+        }));
+      
+      const allBanned = [...bannedVisitors, ...bannedGuests];
+      console.log('✅ Fetched banned persons:', allBanned.length);
+      setBanned(allBanned);
+    } catch (error) {
+      console.error('Error fetching banned persons:', error);
+      toast.error('Failed to fetch banned persons');
+    }
+  };
 
   const filterLogs = () => {
     let filtered = visitLogs;
@@ -309,11 +307,6 @@ const ViewRecordVisits = () => {
     setShowDetailsModal(true);
   };
 
-  const openDeleteModal = (log) => {
-    setSelectedLog(log);
-    setShowDeleteModal(true);
-  };
-
   const openViolationModal = (log) => {
     setSelectedLog(log);
     setSelectedPerson(null);
@@ -354,19 +347,6 @@ const ViewRecordVisits = () => {
       notes: person.banNotes || ''
     });
     setShowBanModal(true);
-  };
-
-  const handleDeleteLog = async (logId) => {
-    try {
-      await axios.delete(`${API_BASE}/visit-logs/${logId}`);
-      toast.success("Visit record deleted successfully");
-      setShowDeleteModal(false);
-      setSelectedLog(null);
-      fetchVisitLogs();
-    } catch (error) {
-      console.error("Error deleting visit log:", error);
-      toast.error("Failed to delete visit record");
-    }
   };
 
   const handleAddViolation = async () => {
@@ -453,44 +433,44 @@ const ViewRecordVisits = () => {
   };
 
   const handleAddBan = async () => {
-  if (!banForm.reason) {
-    toast.error("Please provide a ban reason");
-    return;
-  }
+    if (!banForm.reason) {
+      toast.error("Please provide a ban reason");
+      return;
+    }
 
-  try {
-    const endpoint = selectedLog.personType === 'visitor' 
-      ? `${API_BASE}/visitors/${selectedLog.personId}/ban`
-      : `${API_BASE}/guests/${selectedLog.personId}/ban`;
-    
-    const banData = {
-      reason: banForm.reason,
-      duration: banForm.duration,
-      notes: banForm.notes,
-      isBanned: true
-    };
-    
-    console.log('🔄 Adding ban to:', endpoint);
-    console.log('📦 Ban data:', banData);
-    
-    const response = await axios.put(endpoint, banData);
-    console.log('✅ Ban response:', response.data);
-    
-    toast.success("Person banned successfully");
-    setShowBanModal(false);
-    setSelectedLog(null);
-    
-    // Refresh data
-    fetchBanned();
-    fetchViolators();
-    fetchVisitLogs();
-    
-  } catch (error) {
-    console.error("❌ Error adding ban:", error);
-    console.error("📋 Error details:", error.response?.data);
-    toast.error(`Failed to ban person: ${error.response?.data?.message || error.message}`);
-  }
-};
+    try {
+      const endpoint = selectedLog.personType === 'visitor' 
+        ? `${API_BASE}/visitors/${selectedLog.personId}/ban`
+        : `${API_BASE}/guests/${selectedLog.personId}/ban`;
+      
+      const banData = {
+        reason: banForm.reason,
+        duration: banForm.duration,
+        notes: banForm.notes,
+        isBanned: true
+      };
+      
+      console.log('🔄 Adding ban to:', endpoint);
+      console.log('📦 Ban data:', banData);
+      
+      const response = await axios.put(endpoint, banData);
+      console.log('✅ Ban response:', response.data);
+      
+      toast.success("Person banned successfully");
+      setShowBanModal(false);
+      setSelectedLog(null);
+      
+      // Refresh data
+      fetchBanned();
+      fetchViolators();
+      fetchVisitLogs();
+      
+    } catch (error) {
+      console.error("❌ Error adding ban:", error);
+      console.error("📋 Error details:", error.response?.data);
+      toast.error(`Failed to ban person: ${error.response?.data?.message || error.message}`);
+    }
+  };
 
   const handleEditBan = async () => {
     if (!banForm.reason) {
@@ -523,48 +503,49 @@ const ViewRecordVisits = () => {
     }
   };
 
-const handleRemoveBan = async (personId, personType) => {
-  if (!window.confirm("Are you sure you want to remove this ban and any associated violation records?")) {
-    return;
-  }
-
-  try {
-    // Remove ban
-    const banEndpoint = personType === 'visitor' 
-      ? `${API_BASE}/visitors/${personId}/remove-ban`
-      : `${API_BASE}/guests/${personId}/remove-ban`;
-    
-    console.log('🔄 Removing ban from:', banEndpoint);
-    const banResponse = await axios.put(banEndpoint);
-    console.log('✅ Remove ban response:', banResponse.data);
-
-    // Remove violation WITHOUT showing another confirmation
-    try {
-      const violationEndpoint = personType === 'visitor' 
-        ? `${API_BASE}/visitors/${personId}/remove-violation`
-        : `${API_BASE}/guests/${personId}/remove-violation`;
-      
-      console.log('🔄 Removing violation from:', violationEndpoint);
-      await axios.put(violationEndpoint);
-      console.log('✅ Violation removed successfully');
-    } catch (violationError) {
-      // It's okay if violation removal fails - maybe there was no violation to remove
-      console.log('⚠️ No violation to remove or error removing violation:', violationError.message);
+  const handleRemoveBan = async (personId, personType) => {
+    if (!window.confirm("Are you sure you want to remove this ban and any associated violation records?")) {
+      return;
     }
-    
-    toast.success("Ban removed successfully");
-    
-    // Refresh both lists
-    fetchBanned();
-    fetchViolators();
-    fetchVisitLogs();
-    
-  } catch (error) {
-    console.error("❌ Error removing ban:", error);
-    console.error("📋 Error details:", error.response?.data);
-    toast.error(`Failed to remove ban: ${error.response?.data?.message || error.message}`);
-  }
-};
+
+    try {
+      // Remove ban
+      const banEndpoint = personType === 'visitor' 
+        ? `${API_BASE}/visitors/${personId}/remove-ban`
+        : `${API_BASE}/guests/${personId}/remove-ban`;
+      
+      console.log('🔄 Removing ban from:', banEndpoint);
+      const banResponse = await axios.put(banEndpoint);
+      console.log('✅ Remove ban response:', banResponse.data);
+
+      // Remove violation WITHOUT showing another confirmation
+      try {
+        const violationEndpoint = personType === 'visitor' 
+          ? `${API_BASE}/visitors/${personId}/remove-violation`
+          : `${API_BASE}/guests/${personId}/remove-violation`;
+        
+        console.log('🔄 Removing violation from:', violationEndpoint);
+        await axios.put(violationEndpoint);
+        console.log('✅ Violation removed successfully');
+      } catch (violationError) {
+        // It's okay if violation removal fails - maybe there was no violation to remove
+        console.log('⚠️ No violation to remove or error removing violation:', violationError.message);
+      }
+      
+      toast.success("Ban removed successfully");
+      
+      // Refresh both lists
+      fetchBanned();
+      fetchViolators();
+      fetchVisitLogs();
+      
+    } catch (error) {
+      console.error("❌ Error removing ban:", error);
+      console.error("📋 Error details:", error.response?.data);
+      toast.error(`Failed to remove ban: ${error.response?.data?.message || error.message}`);
+    }
+  };
+
   const exportToCSV = () => {
     const headers = [
       'Visit Date', 'Type', 'Person ID', 'Person Name', 'Prisoner ID', 'Inmate Name', 'Visit Purpose',
@@ -659,7 +640,7 @@ const handleRemoveBan = async (personId, personType) => {
             )}
             <th>Time Details</th>
             <th>Status</th>
-            <th style={{ width: '120px' }}>Actions</th>
+            <th style={{ width: '150px' }}>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -693,7 +674,7 @@ const handleRemoveBan = async (personId, personType) => {
                     <>
                       <div className="fw-bold">{log.inmateName}</div>
                       <div className="small text-muted">
-                        Prisoner ID: {log.prisonerId}
+                        Inmate ID: {log.prisonerId}
                       </div>
                     </>
                   ) : (
@@ -790,7 +771,9 @@ const handleRemoveBan = async (personId, personType) => {
                 </Badge>
               </td>
               <td>
-                <Badge bg="danger">{person.violationType}</Badge>
+                <Badge bg="danger">
+                  {person.violationType === 'Ban' || person.violationType === 'ban' ? 'Banned' : person.violationType}
+                </Badge>
               </td>
               <td>{person.violationDetails || 'No details provided'}</td>
               <td>
@@ -838,6 +821,7 @@ const handleRemoveBan = async (personId, personType) => {
             <th>Person ID</th>
             <th>Name</th>
             <th>Type</th>
+            <th>Ban Status</th>
             <th>Ban Reason</th>
             <th>Ban Duration</th>
             <th style={{ width: '120px' }}>Actions</th>
@@ -852,6 +836,9 @@ const handleRemoveBan = async (personId, personType) => {
                 <Badge bg={getTypeVariant(person.personType)}>
                   {person.personType.toUpperCase()}
                 </Badge>
+              </td>
+              <td>
+                <Badge bg="danger">Banned</Badge>
               </td>
               <td>{person.banReason || 'No reason provided'}</td>
               <td>
@@ -1158,7 +1145,7 @@ const handleRemoveBan = async (personId, personType) => {
                     ) : selectedLog.prisonerId ? (
                       <>
                         <p><strong>Inmate Name:</strong> {selectedLog.inmateName}</p>
-                        <p><strong>Prisoner ID:</strong> {selectedLog.prisonerId}</p>
+                        <p><strong>Inmate ID:</strong> {selectedLog.prisonerId}</p>
                       </>
                     ) : (
                       <p className="text-muted">No inmate associated</p>

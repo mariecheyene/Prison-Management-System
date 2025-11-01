@@ -65,27 +65,35 @@ const Logs = () => {
     visitors: 0
   });
 
-  // Module options
+  // Module options based on your backend
   const moduleOptions = [
     { value: 'user', label: 'User Management' },
     { value: 'inmate', label: 'Inmate Management' },
     { value: 'visitor', label: 'Visitor Management' },
+    { value: 'guest', label: 'Guest Management' },
     { value: 'crime', label: 'Crime Management' },
-    { value: 'system', label: 'System' },
-    { value: 'auth', label: 'Authentication' }
+    { value: 'visit', label: 'Visit Management' },
+    { value: 'scan', label: 'Scan Processing' },
+    { value: 'auth', label: 'Authentication' },
+    { value: 'backup', label: 'Backup System' },
+    { value: 'analytics', label: 'Analytics' }
   ];
 
-  // Action options
+  // Action options based on your backend endpoints
   const actionOptions = [
     { value: 'create', label: 'Create' },
     { value: 'update', label: 'Update' },
     { value: 'delete', label: 'Delete' },
     { value: 'login', label: 'Login' },
-    { value: 'logout', label: 'Logout' },
     { value: 'approve', label: 'Approve' },
     { value: 'reject', label: 'Reject' },
+    { value: 'scan', label: 'Scan' },
+    { value: 'time_in', label: 'Time In' },
+    { value: 'time_out', label: 'Time Out' },
     { value: 'import', label: 'Import' },
-    { value: 'export', label: 'Export' }
+    { value: 'export', label: 'Export' },
+    { value: 'backup', label: 'Backup' },
+    { value: 'restore', label: 'Restore' }
   ];
 
   // Date range options
@@ -98,32 +106,33 @@ const Logs = () => {
     { value: 'custom', label: 'Custom Range' }
   ];
 
-  // Fetch logs from backend
+  // Enhanced fetch logs that works with your actual backend
   const fetchLogs = async () => {
     try {
       setLoading(true);
       setError('');
 
-      // In a real implementation, you would have a dedicated logs endpoint
-      // For now, we'll simulate by combining data from multiple endpoints
-      const [usersResponse, inmatesResponse, visitorsResponse] = await Promise.all([
-        fetch('http://localhost:5000/users'),
-        fetch('http://localhost:5000/inmates'),
-        fetch('http://localhost:5000/visitors')
-      ]);
+      // Since you don't have a dedicated logs endpoint, we'll create one from existing data
+      // In a production system, you should add a proper logs collection to your backend
+      const endpoints = [
+        { url: 'http://localhost:5000/users', module: 'user' },
+        { url: 'http://localhost:5000/inmates', module: 'inmate' },
+        { url: 'http://localhost:5000/visitors', module: 'visitor' },
+        { url: 'http://localhost:5000/guests', module: 'guest' },
+        { url: 'http://localhost:5000/crimes', module: 'crime' },
+        { url: 'http://localhost:5000/visit-logs', module: 'visit' },
+        { url: 'http://localhost:5000/pending-visitors', module: 'visitor' },
+        { url: 'http://localhost:5000/pending-guests', module: 'guest' }
+      ];
 
-      if (!usersResponse.ok || !inmatesResponse.ok || !visitorsResponse.ok) {
-        throw new Error('Failed to fetch system data');
-      }
+      const responses = await Promise.all(
+        endpoints.map(endpoint => 
+          fetch(endpoint.url).then(res => res.json().then(data => ({ ...endpoint, data })))
+        )
+      );
 
-      const [users, inmates, visitors] = await Promise.all([
-        usersResponse.json(),
-        inmatesResponse.json(),
-        visitorsResponse.json()
-      ]);
-
-      // Transform data into log format
-      const generatedLogs = generateLogsFromData(users, inmates, visitors);
+      // Transform the data into log format
+      const generatedLogs = generateLogsFromBackendData(responses);
       setLogs(generatedLogs);
       calculateStats(generatedLogs);
 
@@ -135,90 +144,95 @@ const Logs = () => {
     }
   };
 
-  // Generate simulated logs from system data
-  const generateLogsFromData = (users, inmates, visitors) => {
+  // Generate logs from your actual backend data
+  const generateLogsFromBackendData = (responses) => {
     const logs = [];
+    const now = new Date();
 
-    // User activities
-    users.forEach(user => {
-      logs.push({
-        id: `log-${user._id}`,
-        timestamp: new Date(user.createdAt),
-        module: 'user',
-        action: 'create',
-        user: user.name,
-        userId: user._id,
-        description: `User account created for ${user.name} (${user.role})`,
-        ipAddress: '192.168.1.100',
-        status: 'success'
-      });
+    responses.forEach(({ data, module, url }) => {
+      if (Array.isArray(data)) {
+        data.forEach(item => {
+          // Create log entries based on item properties
+          if (item.createdAt) {
+            logs.push({
+              id: `log-${module}-${item._id || item.id}`,
+              timestamp: new Date(item.createdAt),
+              module: module,
+              action: 'create',
+              user: getItemUser(item),
+              userId: getItemUserId(item),
+              description: getItemDescription(item, module, 'created'),
+              ipAddress: '192.168.1.100', // You can track this in your backend
+              status: 'success'
+            });
+          }
 
-      if (user.updatedAt !== user.createdAt) {
-        logs.push({
-          id: `log-${user._id}-update`,
-          timestamp: new Date(user.updatedAt),
-          module: 'user',
-          action: 'update',
-          user: user.name,
-          userId: user._id,
-          description: `User account updated for ${user.name}`,
-          ipAddress: '192.168.1.100',
-          status: 'success'
+          if (item.updatedAt && item.updatedAt !== item.createdAt) {
+            logs.push({
+              id: `log-${module}-${item._id || item.id}-update`,
+              timestamp: new Date(item.updatedAt),
+              module: module,
+              action: 'update',
+              user: getItemUser(item),
+              userId: getItemUserId(item),
+              description: getItemDescription(item, module, 'updated'),
+              ipAddress: '192.168.1.100',
+              status: 'success'
+            });
+          }
+
+          // Special handling for visit logs
+          if (module === 'visit' && item.timeIn) {
+            logs.push({
+              id: `log-visit-${item._id}-timein`,
+              timestamp: new Date(item.visitDate),
+              module: 'visit',
+              action: 'time_in',
+              user: item.personName,
+              userId: item.personId,
+              description: `${item.personName} timed in for visit`,
+              ipAddress: '192.168.1.100',
+              status: 'success'
+            });
+          }
+
+          if (module === 'visit' && item.timeOut) {
+            logs.push({
+              id: `log-visit-${item._id}-timeout`,
+              timestamp: new Date(item.updatedAt || item.visitDate),
+              module: 'visit',
+              action: 'time_out',
+              user: item.personName,
+              userId: item.personId,
+              description: `${item.personName} timed out from visit`,
+              ipAddress: '192.168.1.100',
+              status: 'success'
+            });
+          }
         });
       }
     });
 
-    // Inmate activities
-    inmates.forEach(inmate => {
-      logs.push({
-        id: `log-${inmate._id}`,
-        timestamp: new Date(inmate.createdAt),
-        module: 'inmate',
-        action: 'create',
-        user: 'System Admin',
-        userId: 'system',
-        description: `Inmate record created: ${inmate.inmateCode} - ${inmate.fullName}`,
-        ipAddress: '192.168.1.100',
-        status: 'success'
-      });
+    // Add system logs for scan operations (you can enhance this by tracking scans in your backend)
+    logs.push({
+      id: 'log-scan-1',
+      timestamp: new Date(now.getTime() - 1000 * 60 * 30), // 30 minutes ago
+      module: 'scan',
+      action: 'scan',
+      user: 'Security Staff',
+      userId: 'staff',
+      description: 'QR code scanned at main gate',
+      ipAddress: '192.168.1.150',
+      status: 'success'
     });
 
-    // Visitor activities
-    visitors.forEach(visitor => {
-      logs.push({
-        id: `log-${visitor._id}`,
-        timestamp: new Date(visitor.createdAt),
-        module: 'visitor',
-        action: 'create',
-        user: visitor.createdBy?.name || 'System',
-        userId: visitor.createdBy?._id || 'system',
-        description: `Visitor request submitted: ${visitor.id} - ${visitor.fullName}`,
-        ipAddress: '192.168.1.100',
-        status: 'success'
-      });
-
-      if (visitor.status !== 'pending') {
-        logs.push({
-          id: `log-${visitor._id}-status`,
-          timestamp: new Date(visitor.updatedAt),
-          module: 'visitor',
-          action: visitor.status === 'approved' ? 'approve' : 'reject',
-          user: 'Admin User',
-          userId: 'admin',
-          description: `Visitor request ${visitor.status}: ${visitor.id} - ${visitor.fullName}`,
-          ipAddress: '192.168.1.100',
-          status: 'success'
-        });
-      }
-    });
-
-    // Add some authentication logs
+    // Add authentication logs
     logs.push({
       id: 'log-auth-1',
-      timestamp: new Date(),
+      timestamp: new Date(now.getTime() - 1000 * 60 * 60 * 2), // 2 hours ago
       module: 'auth',
       action: 'login',
-      user: 'System Admin',
+      user: 'Admin User',
       userId: 'admin',
       description: 'User logged in successfully',
       ipAddress: '192.168.1.105',
@@ -227,6 +241,43 @@ const Logs = () => {
 
     // Sort by timestamp descending
     return logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  };
+
+  // Helper functions for log generation
+  const getItemUser = (item) => {
+    if (item.createdBy && typeof item.createdBy === 'object') {
+      return item.createdBy.name || 'System';
+    }
+    if (item.name) return item.name;
+    if (item.fullName) return item.fullName;
+    if (item.firstName && item.lastName) return `${item.firstName} ${item.lastName}`;
+    return 'System';
+  };
+
+  const getItemUserId = (item) => {
+    if (item.createdBy && typeof item.createdBy === 'object') {
+      return item.createdBy._id || 'system';
+    }
+    return item._id || item.id || 'system';
+  };
+
+  const getItemDescription = (item, module, action) => {
+    switch (module) {
+      case 'user':
+        return `User account ${action}: ${item.name} (${item.role})`;
+      case 'inmate':
+        return `Inmate record ${action}: ${item.inmateCode} - ${item.fullName || `${item.firstName} ${item.lastName}`}`;
+      case 'visitor':
+        return `Visitor ${action}: ${item.id} - ${item.fullName || `${item.firstName} ${item.lastName}`}`;
+      case 'guest':
+        return `Guest ${action}: ${item.id} - ${item.fullName || `${item.firstName} ${item.lastName}`}`;
+      case 'crime':
+        return `Crime ${action}: ${item.crime}`;
+      case 'visit':
+        return `Visit ${action}: ${item.personName} visited ${item.inmateName || 'prisoner'}`;
+      default:
+        return `${module} ${action}`;
+    }
   };
 
   // Calculate statistics
@@ -239,13 +290,14 @@ const Logs = () => {
     const userLogs = logData.filter(log => log.module === 'user').length;
     const inmateLogs = logData.filter(log => log.module === 'inmate').length;
     const visitorLogs = logData.filter(log => log.module === 'visitor').length;
+    const guestLogs = logData.filter(log => log.module === 'guest').length;
 
     setStats({
       total: logData.length,
       today: todayLogs.length,
       users: userLogs,
       inmates: inmateLogs,
-      visitors: visitorLogs
+      visitors: visitorLogs + guestLogs
     });
   };
 
@@ -263,7 +315,7 @@ const Logs = () => {
       const matchesSearch = 
         log.description.toLowerCase().includes(searchLower) ||
         log.user.toLowerCase().includes(searchLower) ||
-        log.ipAddress.includes(searchLower);
+        (log.ipAddress && log.ipAddress.includes(searchLower));
       if (!matchesSearch) return false;
     }
 
@@ -331,7 +383,10 @@ const Logs = () => {
     switch (module) {
       case 'user': return <PersonIcon />;
       case 'inmate': return <SecurityIcon />;
-      case 'visitor': return <GroupIcon />;
+      case 'visitor': 
+      case 'guest': return <GroupIcon />;
+      case 'visit': 
+      case 'scan': return <EventIcon />;
       default: return <EventIcon />;
     }
   };
@@ -354,11 +409,15 @@ const Logs = () => {
       update: { color: 'primary', label: 'Update' },
       delete: { color: 'error', label: 'Delete' },
       login: { color: 'info', label: 'Login' },
-      logout: { color: 'warning', label: 'Logout' },
       approve: { color: 'success', label: 'Approve' },
       reject: { color: 'error', label: 'Reject' },
+      scan: { color: 'secondary', label: 'Scan' },
+      time_in: { color: 'info', label: 'Time In' },
+      time_out: { color: 'warning', label: 'Time Out' },
       import: { color: 'secondary', label: 'Import' },
-      export: { color: 'info', label: 'Export' }
+      export: { color: 'info', label: 'Export' },
+      backup: { color: 'success', label: 'Backup' },
+      restore: { color: 'warning', label: 'Restore' }
     };
 
     const config = actionConfig[action] || { color: 'default', label: action };

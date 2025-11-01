@@ -234,46 +234,48 @@ const Guest = () => {
   };
 
   const exportToCSV = () => {
-    const headers = [
-      'Guest ID', 'Last Name', 'First Name', 'Middle Name', 'Extension',
-      'Date of Birth', 'Age', 'Gender', 'Address', 'Contact',
-      'Visit Purpose', 'Status', 'Violation Type', 'Violation Details', 'Date Visited', 'Time In', 'Time Out'
-    ];
+  const headers = [
+    'Guest ID', 
+    'Last Name', 
+    'First Name', 
+    'Middle Name', 
+    'Extension',
+    'Date of Birth', 
+    'Age', 
+    'Gender', 
+    'Address', 
+    'Contact',
+    'Visit Purpose'
+  ];
 
-    const csvData = guests.map(guest => [
-      guest.id,
-      guest.lastName,
-      guest.firstName,
-      guest.middleName || '',
-      guest.extension || '',
-      guest.dateOfBirth ? new Date(guest.dateOfBirth).toLocaleDateString() : '',
-      guest.age || '',
-      guest.sex,
-      guest.address,
-      guest.contact,
-      guest.visitPurpose,
-      guest.status || 'approved',
-      guest.violationType || 'No violation',
-      guest.violationDetails || 'No violation data',
-      guest.dateVisited ? new Date(guest.dateVisited).toLocaleDateString() : 'Not visited',
-      guest.timeIn || 'Not recorded',
-      guest.timeOut || 'Not recorded'
-    ]);
+  const csvData = guests.map(guest => [
+    guest.id,
+    guest.lastName,
+    guest.firstName,
+    guest.middleName || '',
+    guest.extension || '',
+    guest.dateOfBirth ? new Date(guest.dateOfBirth).toLocaleDateString() : '',
+    guest.age || '',
+    guest.sex,
+    guest.address,
+    guest.contact,
+    guest.visitPurpose
+  ]);
 
-    const csvContent = [headers, ...csvData]
-      .map(row => row.map(field => `"${field}"`).join(','))
-      .join('\n');
+  const csvContent = [headers, ...csvData]
+    .map(row => row.map(field => `"${field}"`).join(','))
+    .join('\n');
 
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `guests_${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
-    window.URL.revokeObjectURL(url);
-    
-    toast.success(`Exported ${guests.length} guests to CSV`);
-  };
+  const blob = new Blob([csvContent], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `guests_${new Date().toISOString().split('T')[0]}.csv`;
+  link.click();
+  window.URL.revokeObjectURL(url);
+  
+  toast.success(`Exported ${guests.length} guests to CSV`);
+};
 
   const downloadQRCode = () => {
     if (!selectedQRGuest?.qrCode) return;

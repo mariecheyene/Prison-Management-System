@@ -37,12 +37,15 @@ const ViewVisitorFemaleDivision = () => {
   const [imageFile, setImageFile] = useState(null);
   const [prisonerIdSuggestions, setPrisonerIdSuggestions] = useState([]);
   const [prisonerIdInput, setPrisonerIdInput] = useState('');
+  const [prisonerNameInput, setPrisonerNameInput] = useState('');
+  const [prisonerNameSuggestions, setPrisonerNameSuggestions] = useState([]);
 
   const searchOptions = [
     { value: 'lastName', label: 'Last Name' },
     { value: 'firstName', label: 'First Name' },
     { value: 'id', label: 'Visitor ID' },
-    { value: 'prisonerId', label: 'Prisoner ID' },
+    { value: 'prisonerId', label: 'Inmate ID' },
+    { value: 'prisonerName', label: 'Inmate Name' },
     { value: 'relationship', label: 'Relationship' },
     { value: 'status', label: 'Status' }
   ];
@@ -78,7 +81,15 @@ const ViewVisitorFemaleDivision = () => {
     setIsLoading(true);
     try {
       const response = await axios.get("http://localhost:5000/visitors");
-      setVisitors(response.data);
+      // Sort visitors alphabetically by last name, then first name
+      const sortedVisitors = response.data.sort((a, b) => {
+        const lastNameCompare = a.lastName.localeCompare(b.lastName);
+        if (lastNameCompare !== 0) {
+          return lastNameCompare;
+        }
+        return a.firstName.localeCompare(b.firstName);
+      });
+      setVisitors(sortedVisitors);
     } catch (error) {
       console.error("Error fetching visitors:", error);
       toast.error("Failed to fetch visitors");
@@ -117,19 +128,16 @@ const ViewVisitorFemaleDivision = () => {
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(visitor => {
+        if (searchBy === 'prisonerName') {
+          // Search in prisonerName field
+          const prisonerName = visitor.prisonerName?.toString().toLowerCase() || '';
+          return prisonerName.includes(query);
+        }
+        
         const value = visitor[searchBy]?.toString().toLowerCase() || '';
         return value.includes(query);
       });
     }
-    
-    // THIRD: Sort alphabetically by last name, then first name
-    filtered = filtered.sort((a, b) => {
-      const lastNameCompare = a.lastName.localeCompare(b.lastName);
-      if (lastNameCompare !== 0) {
-        return lastNameCompare;
-      }
-      return a.firstName.localeCompare(b.firstName);
-    });
     
     setFilteredVisitors(filtered);
   };
@@ -155,18 +163,52 @@ const ViewVisitorFemaleDivision = () => {
     }));
   };
 
+  const handlePrisonerNameChange = (e) => {
+    const value = e.target.value;
+    setPrisonerNameInput(value);
+    
+    // Filter suggestions based on name input - ONLY FEMALE INMATES
+    if (value.trim()) {
+      const filtered = femaleInmates.filter(inmate => 
+        inmate.fullName.toLowerCase().includes(value.toLowerCase()) ||
+        inmate.lastName.toLowerCase().includes(value.toLowerCase()) ||
+        inmate.firstName.toLowerCase().includes(value.toLowerCase())
+      ).slice(0, 5); // Show only top 5 suggestions
+      setPrisonerNameSuggestions(filtered);
+    } else {
+      setPrisonerNameSuggestions([]);
+    }
+  };
+
   const selectPrisonerSuggestion = (inmate) => {
-    setPrisonerIdInput(`${inmate.inmateCode} - ${inmate.fullName}`);
+    setPrisonerIdInput(inmate.inmateCode);
+    setPrisonerNameInput(inmate.fullName);
+    setPrisonerIdSuggestions([]);
+    setPrisonerNameSuggestions([]);
+    
     setFormData(prev => ({
       ...prev,
       prisonerId: inmate.inmateCode
     }));
+  };
+
+  const selectPrisonerNameSuggestion = (inmate) => {
+    setPrisonerNameInput(inmate.fullName);
+    setPrisonerIdInput(inmate.inmateCode);
+    setPrisonerNameSuggestions([]);
     setPrisonerIdSuggestions([]);
+    
+    setFormData(prev => ({
+      ...prev,
+      prisonerId: inmate.inmateCode
+    }));
   };
 
   const handleAdd = () => {
     setPrisonerIdInput('');
+    setPrisonerNameInput('');
     setPrisonerIdSuggestions([]);
+    setPrisonerNameSuggestions([]);
     const initialData = {
       lastName: '',
       firstName: '',
@@ -179,7 +221,7 @@ const ViewVisitorFemaleDivision = () => {
       contact: '',
       prisonerId: '',
       relationship: '',
-      status: 'pending' // Staff requests go to pending
+      status: 'pending'
     };
     setFormData(initialData);
     setImageFile(null);
@@ -323,48 +365,52 @@ const ViewVisitorFemaleDivision = () => {
   };
 
   const exportToCSV = () => {
-    const headers = [
-      'Visitor ID', 'Last Name', 'First Name', 'Middle Name', 'Extension',
-      'Date of Birth', 'Age', 'Gender', 'Address', 'Contact',
-      'Prisoner ID', 'Relationship', 'Status', 'Date Visited', 'Time In', 'Time Out',
-      'Violation Type', 'Violation Details'
-    ];
+  const headers = [
+    'Visitor ID', 
+    'Last Name', 
+    'First Name', 
+    'Middle Name', 
+    'Extension',
+    'Date of Birth', 
+    'Age', 
+    'Gender', 
+    'Address', 
+    'Contact',
+    'Inmate ID', 
+    'Inmate Name',
+    'Relationship'
+  ];
 
-    const csvData = filteredVisitors.map(visitor => [
-      visitor.id,
-      visitor.lastName,
-      visitor.firstName,
-      visitor.middleName || '',
-      visitor.extension || '',
-      visitor.dateOfBirth ? new Date(visitor.dateOfBirth).toLocaleDateString() : '',
-      visitor.age || '',
-      visitor.sex,
-      visitor.address,
-      visitor.contact,
-      visitor.prisonerId,
-      visitor.relationship,
-      visitor.status,
-      visitor.dateVisited ? new Date(visitor.dateVisited).toLocaleDateString() : 'Not visited',
-      visitor.timeIn || 'Not recorded',
-      visitor.timeOut || 'Not recorded',
-      visitor.violationType || 'No violation',
-      visitor.violationDetails || 'No violation data'
-    ]);
+  const csvData = filteredVisitors.map(visitor => [
+    visitor.id,
+    visitor.lastName,
+    visitor.firstName,
+    visitor.middleName || '',
+    visitor.extension || '',
+    visitor.dateOfBirth ? new Date(visitor.dateOfBirth).toLocaleDateString() : '',
+    visitor.age || '',
+    visitor.sex,
+    visitor.address,
+    visitor.contact,
+    visitor.prisonerId,
+    visitor.prisonerName || 'N/A',
+    visitor.relationship
+  ]);
 
-    const csvContent = [headers, ...csvData]
-      .map(row => row.map(field => `"${field}"`).join(','))
-      .join('\n');
+  const csvContent = [headers, ...csvData]
+    .map(row => row.map(field => `"${field}"`).join(','))
+    .join('\n');
 
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `female_division_visitors_${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
-    window.URL.revokeObjectURL(url);
-    
-    toast.success(`Exported ${filteredVisitors.length} female division visitors to CSV`);
-  };
+  const blob = new Blob([csvContent], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `female_division_visitors_${new Date().toISOString().split('T')[0]}.csv`;
+  link.click();
+  window.URL.revokeObjectURL(url);
+  
+  toast.success(`Exported ${filteredVisitors.length} female division visitors to CSV`);
+};
 
   const downloadQRCode = () => {
     if (!selectedQRVisitor?.qrCode) return;
@@ -394,7 +440,9 @@ const ViewVisitorFemaleDivision = () => {
       status: 'pending'
     });
     setPrisonerIdInput('');
+    setPrisonerNameInput('');
     setPrisonerIdSuggestions([]);
+    setPrisonerNameSuggestions([]);
     setImageFile(null);
   };
 
@@ -460,7 +508,6 @@ const ViewVisitorFemaleDivision = () => {
 
   const printVisitorDetails = () => {
     const printWindow = window.open('', '_blank');
-    const timeStatus = getTimeStatus(selectedVisitor);
     
     printWindow.document.write(`
       <html>
@@ -497,14 +544,6 @@ const ViewVisitorFemaleDivision = () => {
               font-weight: bold;
               color: #2c3e50;
             }
-            .division-badge {
-              background-color: #e83e8c;
-              color: white;
-              padding: 5px 10px;
-              border-radius: 4px;
-              font-weight: bold;
-              margin-left: 10px;
-            }
             .section { 
               margin-bottom: 25px; 
               padding: 15px;
@@ -533,12 +572,6 @@ const ViewVisitorFemaleDivision = () => {
             }
             .full-width {
               grid-column: 1 / -1;
-            }
-            .violation { 
-              background-color: #ffe6e6; 
-              border-left: 4px solid #dc3545;
-              padding: 10px;
-              margin: 10px 0;
             }
             .qr-code {
               text-align: center;
@@ -576,16 +609,16 @@ const ViewVisitorFemaleDivision = () => {
               margin-bottom: 10px;
               color: #2c3e50;
             }
-            .time-status {
+            .status-badge {
               display: inline-block;
               padding: 4px 8px;
               border-radius: 4px;
               color: white;
               font-weight: bold;
+              background-color: #28a745;
             }
-            .status-success { background-color: #28a745; }
-            .status-info { background-color: #17a2b8; }
-            .status-secondary { background-color: #6c757d; }
+            .status-pending { background-color: #ffc107; color: #000; }
+            .status-rejected { background-color: #dc3545; }
             @media print {
               body { margin: 10px; }
               .section { border: none; }
@@ -599,30 +632,11 @@ const ViewVisitorFemaleDivision = () => {
         <body>
           <div class="header">
             <h1>LANAO DEL NORTE DISTRICT JAIL</h1>
-            <h2>Region 10 - <span class="division-badge">FEMALE DIVISION</span></h2>
+            <h2>Region 10</h2>
             <h3>VISITOR DETAILS RECORD - ID: ${selectedVisitor?.id}</h3>
           </div>
           
           ${selectedVisitor ? `
-            <div class="section">
-              <h3>Time Tracking Information</h3>
-              <div class="info-grid">
-                <div class="info-item">
-                  <span class="label">Visit Date:</span> ${selectedVisitor.dateVisited ? new Date(selectedVisitor.dateVisited).toLocaleDateString() : 'Not yet visited'}
-                </div>
-                <div class="info-item">
-                  <span class="label">Time In:</span> ${selectedVisitor.timeIn || 'Not recorded'}
-                </div>
-                <div class="info-item">
-                  <span class="label">Time Out:</span> ${selectedVisitor.timeOut || 'Not recorded'}
-                </div>
-                <div class="info-item">
-                  <span class="label">Time Status:</span> 
-                  <span class="time-status status-${timeStatus.variant}">${timeStatus.text}</span>
-                </div>
-              </div>
-            </div>
-
             <div class="section">
               <h3>Identification</h3>
               <div class="photo-container">
@@ -649,6 +663,9 @@ const ViewVisitorFemaleDivision = () => {
               <h3>Visitor Information</h3>
               <div class="info-grid">
                 <div class="info-item">
+                  <span class="label">Visitor ID:</span> ${selectedVisitor.id}
+                </div>
+                <div class="info-item">
                   <span class="label">Full Name:</span> ${selectedVisitor.fullName}
                 </div>
                 <div class="info-item">
@@ -667,7 +684,8 @@ const ViewVisitorFemaleDivision = () => {
                   <span class="label">Contact:</span> ${selectedVisitor.contact || 'N/A'}
                 </div>
                 <div class="info-item">
-                  <span class="label">Status:</span> ${selectedVisitor.status.toUpperCase()}
+                  <span class="label">Status:</span> 
+                  <span class="status-badge status-${selectedVisitor.status}">${selectedVisitor.status.toUpperCase()}</span>
                 </div>
               </div>
             </div>
@@ -676,30 +694,16 @@ const ViewVisitorFemaleDivision = () => {
               <h3>Visit Details</h3>
               <div class="info-grid">
                 <div class="info-item">
-                  <span class="label">Prisoner ID:</span> ${selectedVisitor.prisonerId}
+                  <span class="label">Inmate ID:</span> ${selectedVisitor.prisonerId}
+                </div>
+                <div class="info-item">
+                  <span class="label">Inmate Name:</span> ${selectedVisitor.prisonerName || 'N/A'}
                 </div>
                 <div class="info-item">
                   <span class="label">Relationship:</span> ${selectedVisitor.relationship}
                 </div>
-                <div class="info-item">
-                  <span class="label">Division:</span> <strong>FEMALE DIVISION</strong>
-                </div>
               </div>
             </div>
-
-            ${selectedVisitor.violationType ? `
-            <div class="section">
-              <h3>Violation Information</h3>
-              <div class="violation">
-                <div class="info-item">
-                  <span class="label">Violation Type:</span> ${selectedVisitor.violationType}
-                </div>
-                <div class="info-item full-width">
-                  <span class="label">Violation Details:</span> ${selectedVisitor.violationDetails || 'No violation data'}
-                </div>
-              </div>
-            </div>
-            ` : ''}
 
             <div class="section">
               <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
@@ -728,8 +732,8 @@ const ViewVisitorFemaleDivision = () => {
           <h2 style={{ fontFamily: "Poppins, sans-serif", fontWeight: "600", color: "#2c3e50" }}>
             👥 Female Division Visitors Management
           </h2>
-          <Badge bg="pink" className="mb-2" text="dark">
-            Female Division Staff Access
+          <Badge bg="info" className="mb-2">
+            Staff Access
           </Badge>
           <div className="text-muted small">
             Only showing visitors connected to female inmates
@@ -758,7 +762,7 @@ const ViewVisitorFemaleDivision = () => {
                 </InputGroup.Text>
                 <Form.Control
                   type="text"
-                  placeholder="Search female division visitors..."
+                  placeholder="Search visitors..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="border-start-0"
@@ -779,7 +783,7 @@ const ViewVisitorFemaleDivision = () => {
             </Col>
             <Col md={4}>
               <div className="text-muted small">
-                {filteredVisitors.length} female division visitors found
+                {filteredVisitors.length} visitors found
               </div>
             </Col>
           </Row>
@@ -789,95 +793,94 @@ const ViewVisitorFemaleDivision = () => {
       {isLoading && visitors.length === 0 ? (
         <div className="text-center">
           <Spinner animation="border" role="status">
-            <span className="visually-hidden">Loading female division visitors...</span>
+            <span className="visually-hidden">Loading visitors...</span>
           </Spinner>
         </div>
       ) : filteredVisitors.length === 0 ? (
         <Alert variant="info">
-          {searchQuery ? 'No female division visitors found matching your search.' : 'No female division visitors found. Add your first visitor to get started.'}
+          {searchQuery ? 'No visitors found matching your search.' : 'No visitors found. Add your first visitor to get started.'}
         </Alert>
       ) : (
-        <Table striped bordered hover responsive className="bg-white">
-          <thead className="table-dark">
-            <tr>
-              <th>Visitor ID</th>
-              <th>Full Name</th>
-              <th>Gender</th>
-              <th>Prisoner ID</th>
-              <th>Relationship</th>
-              <th>Last Visit Date</th>
-              <th>Time Status</th>
-              <th>Violation Type</th>
-              <th style={{ width: '80px' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredVisitors.map(visitor => (
-              <tr key={visitor._id}>
-                <td><strong>{visitor.id}</strong></td>
-                <td>{visitor.fullName}</td>
-                <td>{visitor.sex}</td>
-                <td>{visitor.prisonerId}</td>
-                <td>{visitor.relationship}</td>
-                <td>
-                  {visitor.dateVisited ? (
-                    <Badge bg="info">
-                      {formatDate(visitor.dateVisited)}
-                    </Badge>
-                  ) : (
-                    <Badge bg="secondary">Not visited</Badge>
-                  )}
-                </td>
-                <td>
-                  <Badge bg={getTimeStatus(visitor).variant}>
-                    {getTimeStatus(visitor).text}
-                  </Badge>
-                </td>
-                <td>
-                  <Badge bg={getViolationVariant(visitor)}>
-                    {getViolationText(visitor)}
-                  </Badge>
-                </td>
-                <td>
-                  <div className="d-flex gap-1">
-                    <Button 
-                      variant="outline-primary" 
-                      size="sm" 
-                      onClick={() => handleShowQR(visitor)}
-                      className="p-1"
-                      title="QR Code"
-                    >
-                      <Grid size={14} />
-                    </Button>
-                    <Button 
-                      variant="outline-info" 
-                      size="sm" 
-                      onClick={() => handleView(visitor)}
-                      className="p-1"
-                      title="View Details"
-                    >
-                      <Eye size={14} />
-                    </Button>
-                  </div>
-                </td>
+        <div className="table-responsive" style={{ fontSize: '14px' }}>
+          <Table striped bordered hover responsive className="bg-white">
+            <thead className="table-dark">
+              <tr>
+                <th className="text-center">Visitor ID</th>
+                <th className="text-center">Full Name</th>
+                <th className="text-center">Gender</th>
+                <th className="text-center">Inmate ID</th>
+                <th className="text-center">Inmate Name</th>
+                <th className="text-center">Relationship</th>
+                <th className="text-center">Last Visit</th>
+                <th className="text-center">Time Status</th>
+                <th className="text-center">Violation</th>
+                <th className="text-center" style={{ width: '100px' }}>Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </Table>
+            </thead>
+            <tbody>
+              {filteredVisitors.map(visitor => (
+                <tr key={visitor._id}>
+                  <td className="text-center"><strong>{visitor.id}</strong></td>
+                  <td className="text-center">{visitor.fullName}</td>
+                  <td className="text-center">{visitor.sex}</td>
+                  <td className="text-center">{visitor.prisonerId}</td>
+                  <td className="text-center">{visitor.prisonerName || 'N/A'}</td>
+                  <td className="text-center">{visitor.relationship}</td>
+                  <td className="text-center">
+                    {visitor.lastVisitDate ? (
+                      <Badge bg="info" className="text-wrap">
+                        {formatDate(visitor.lastVisitDate)}
+                      </Badge>
+                    ) : (
+                      <Badge bg="secondary" className="text-wrap">Not visited</Badge>
+                    )}
+                  </td>
+                  <td className="text-center">
+                    <Badge bg={getTimeStatus(visitor).variant} className="text-wrap">
+                      {getTimeStatus(visitor).text}
+                    </Badge>
+                  </td>
+                  <td className="text-center">
+                    <Badge bg={getViolationVariant(visitor)} className="text-wrap">
+                      {getViolationText(visitor)}
+                    </Badge>
+                  </td>
+                  <td className="text-center">
+                    <div className="d-flex gap-1 justify-content-center">
+                      <Button 
+                        variant="outline-primary" 
+                        size="sm" 
+                        onClick={() => handleShowQR(visitor)}
+                        className="p-1"
+                        title="QR Code"
+                      >
+                        <Grid size={14} />
+                      </Button>
+                      <Button 
+                        variant="outline-info" 
+                        size="sm" 
+                        onClick={() => handleView(visitor)}
+                        className="p-1"
+                        title="View Details"
+                      >
+                        <Eye size={14} />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </div>
       )}
 
       {/* Add Modal */}
       <Modal show={showModal} onHide={() => setShowModal(false)} size="lg">
         <Modal.Header closeButton>
-          <Modal.Title>Request New Visitor - Female Division</Modal.Title>
+          <Modal.Title>Request New Visitor</Modal.Title>
         </Modal.Header>
         <Form onSubmit={handleSubmit}>
           <Modal.Body style={{ maxHeight: '70vh', overflowY: 'auto' }}>
-            <Alert variant="info" className="mb-3">
-              <strong>Note:</strong> This form is for requesting visitors to <strong>Female Division inmates only</strong>.
-              All requests will be submitted for approval.
-            </Alert>
-            
             <Row>
               <Col md={6}>
                 <Form.Group className="mb-3">
@@ -1008,13 +1011,13 @@ const ViewVisitorFemaleDivision = () => {
             <Row>
               <Col md={6}>
                 <Form.Group className="mb-3">
-                  <Form.Label>Prisoner ID * <Badge bg="pink" text="dark">Female Division Only</Badge></Form.Label>
+                  <Form.Label>Inmate ID *</Form.Label>
                   <Form.Control
                     type="text"
                     value={prisonerIdInput}
                     onChange={handlePrisonerIdChange}
                     required
-                    placeholder="Search female inmates by ID or name"
+                    placeholder="Enter inmate ID"
                   />
                   {prisonerIdSuggestions.length > 0 && (
                     <div className="border mt-1" style={{ maxHeight: '150px', overflowY: 'auto' }}>
@@ -1022,21 +1025,45 @@ const ViewVisitorFemaleDivision = () => {
                         <div
                           key={inmate._id}
                           className="p-2 border-bottom hover-bg"
-                          style={{ cursor: 'pointer' }}
+                          style={{ cursor: 'pointer', backgroundColor: '#f8f9fa' }}
                           onClick={() => selectPrisonerSuggestion(inmate)}
                         >
                           <strong>{inmate.inmateCode}</strong> - {inmate.fullName}
-                          <Badge bg="pink" text="dark" className="ms-2">Female</Badge>
                         </div>
                       ))}
                     </div>
                   )}
-                  <Form.Text className="text-muted">
-                    Only female division inmates will appear in search results
-                  </Form.Text>
                 </Form.Group>
               </Col>
               <Col md={6}>
+                <Form.Group className="mb-3">
+                  <Form.Label>Inmate Name*</Form.Label>
+                  <Form.Control
+                    type="text"
+                    value={prisonerNameInput}
+                    onChange={handlePrisonerNameChange}
+                    placeholder="Search by inmate name"
+                  />
+                  {prisonerNameSuggestions.length > 0 && (
+                    <div className="border mt-1" style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                      {prisonerNameSuggestions.map(inmate => (
+                        <div
+                          key={inmate._id}
+                          className="p-2 border-bottom hover-bg"
+                          style={{ cursor: 'pointer', backgroundColor: '#f8f9fa' }}
+                          onClick={() => selectPrisonerNameSuggestion(inmate)}
+                        >
+                          <strong>{inmate.fullName}</strong> - {inmate.inmateCode}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Form.Group>
+              </Col>
+            </Row>
+
+            <Row>
+              <Col md={12}>
                 <Form.Group className="mb-3">
                   <Form.Label>Relationship *</Form.Label>
                   <Form.Control
@@ -1064,9 +1091,8 @@ const ViewVisitorFemaleDivision = () => {
             </Form.Group>
 
             <Alert variant="info" className="mt-3">
-              <strong>Note:</strong> All visitor requests will be submitted for approval.
+              <strong>Note:</strong> All visitor requests will be submitted for admin approval.
               Once approved, a unique QR code will be generated for time-in/time-out tracking.
-              Visitors can only be connected to female division inmates.
             </Alert>
           </Modal.Body>
           <Modal.Footer>
@@ -1074,7 +1100,7 @@ const ViewVisitorFemaleDivision = () => {
               Cancel
             </Button>
             <Button variant="dark" type="submit" disabled={isLoading}>
-              {isLoading ? <Spinner size="sm" /> : 'Request Visitor'}
+              {isLoading ? <Spinner size="sm" /> : 'Submit Request'}
             </Button>
           </Modal.Footer>
         </Form>
@@ -1083,34 +1109,12 @@ const ViewVisitorFemaleDivision = () => {
       {/* View Modal */}
       <Modal show={showViewModal} onHide={() => setShowViewModal(false)} size="lg">
         <Modal.Header closeButton>
-          <Modal.Title>
-            Visitor Details - {selectedVisitor?.id} 
-            <Badge bg="pink" text="dark" className="ms-2">Female Division</Badge>
-          </Modal.Title>
+          <Modal.Title>Visitor Details - {selectedVisitor?.id}</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           {selectedVisitor && (
             <Row>
-              <Col md={12}>
-                <Card className="mb-4">
-                  <Card.Header>
-                    <strong>Time Tracking Information</strong>
-                  </Card.Header>
-                  <Card.Body>
-                    <Row>
-                      <Col md={6}>
-                        <p><strong>Visit Date:</strong> {selectedVisitor.dateVisited ? new Date(selectedVisitor.dateVisited).toLocaleDateString() : 'Not yet visited'}</p>
-                        <p><strong>Time In:</strong> {selectedVisitor.timeIn || 'Not recorded'}</p>
-                      </Col>
-                      <Col md={6}>
-                        <p><strong>Time Out:</strong> {selectedVisitor.timeOut || 'Not recorded'}</p>
-                        <p><strong>Time Status:</strong> <Badge bg={getTimeStatus(selectedVisitor).variant}>{getTimeStatus(selectedVisitor).text}</Badge></p>
-                      </Col>
-                    </Row>
-                  </Card.Body>
-                </Card>
-              </Col>
-
+              {/* QR Code Section */}
               <Col md={12}>
                 <Card className="mb-4">
                   <Card.Header>
@@ -1137,6 +1141,7 @@ const ViewVisitorFemaleDivision = () => {
                 </Card>
               </Col>
               
+              {/* Visitor Photo and Information */}
               <Col md={6}>
                 <Card className="mb-3">
                   <Card.Header>
@@ -1157,6 +1162,7 @@ const ViewVisitorFemaleDivision = () => {
                         />
                       </div>
                     )}
+                    <p><strong>Visitor ID:</strong> {selectedVisitor.id}</p>
                     <p><strong>Full Name:</strong> {selectedVisitor.fullName}</p>
                     <p><strong>Gender:</strong> {selectedVisitor.sex}</p>
                     <p><strong>Date of Birth:</strong> {new Date(selectedVisitor.dateOfBirth).toLocaleDateString()}</p>
@@ -1167,30 +1173,19 @@ const ViewVisitorFemaleDivision = () => {
                   </Card.Body>
                 </Card>
               </Col>
+              
+              {/* Inmate Information Only */}
               <Col md={6}>
                 <Card className="mb-3">
                   <Card.Header>
                     <strong>Visit Details</strong>
-                    <Badge bg="pink" text="dark" className="ms-2">Female Division</Badge>
                   </Card.Header>
                   <Card.Body>
-                    <p><strong>Prisoner ID:</strong> {selectedVisitor.prisonerId}</p>
+                    <p><strong>Inmate ID:</strong> {selectedVisitor.prisonerId}</p>
+                    <p><strong>Inmate Name:</strong> {selectedVisitor.prisonerName || 'N/A'}</p>
                     <p><strong>Relationship:</strong> {selectedVisitor.relationship}</p>
-                    <p><strong>Division:</strong> <Badge bg="pink" text="dark">Female Division</Badge></p>
                   </Card.Body>
                 </Card>
-                
-                {selectedVisitor.violationType && (
-                  <Card className="mb-3 border-danger">
-                    <Card.Header className="bg-danger text-white">
-                      <strong>Violation Information</strong>
-                    </Card.Header>
-                    <Card.Body>
-                      <p><strong>Violation Type:</strong> {selectedVisitor.violationType}</p>
-                      <p><strong>Violation Details:</strong> {selectedVisitor.violationDetails || 'No violation data'}</p>
-                    </Card.Body>
-                  </Card>
-                )}
               </Col>
             </Row>
           )}
@@ -1206,57 +1201,12 @@ const ViewVisitorFemaleDivision = () => {
         </Modal.Footer>
       </Modal>
 
-      {/* QR Code Modal */}
-      <Modal show={showQRModal} onHide={() => setShowQRModal(false)} size="sm">
-        <Modal.Header closeButton>
-          <Modal.Title>
-            Visitor QR Code - {selectedQRVisitor?.id}
-            <Badge bg="pink" text="dark" className="ms-2">Female</Badge>
-          </Modal.Title>
-        </Modal.Header>
-        <Modal.Body className="text-center">
-          {selectedQRVisitor && (
-            <>
-              {selectedQRVisitor.qrCode ? (
-                <>
-                  <img 
-                    src={selectedQRVisitor.qrCode} 
-                    alt="Visitor QR Code" 
-                    style={{ maxWidth: '100%', height: 'auto' }}
-                  />
-                  <p className="mt-3"><strong>{selectedQRVisitor.fullName}</strong></p>
-                  <p className="text-muted">Visitor ID: {selectedQRVisitor.id}</p>
-                  <Badge bg="pink" text="dark">Female Division Visitor</Badge>
-                </>
-              ) : (
-                <Alert variant="warning">
-                  QR code not generated yet. Please wait or regenerate QR code.
-                </Alert>
-              )}
-            </>
-          )}
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowQRModal(false)}>
-            Close
-          </Button>
-          <Button variant="dark" onClick={downloadQRCode} disabled={!selectedQRVisitor?.qrCode}>
-            <Download size={16} className="me-1" />
-            Download QR
-          </Button>
-        </Modal.Footer>
-      </Modal>
-
       {/* CSV Upload Modal */}
       <Modal show={showUploadModal} onHide={() => setShowUploadModal(false)}>
         <Modal.Header closeButton>
-          <Modal.Title>Import Visitors from CSV - Female Division</Modal.Title>
+          <Modal.Title>Import Visitors from CSV</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          <Alert variant="info" className="mb-3">
-            <strong>Note:</strong> CSV imports will only process visitors for female division inmates.
-            Prisoner IDs must belong to female inmates.
-          </Alert>
           <Form.Group>
             <Form.Label>Select CSV File</Form.Label>
             <Form.Control

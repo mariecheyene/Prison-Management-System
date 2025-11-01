@@ -36,8 +36,6 @@ const Maintenance = () => {
   const [format, setFormat] = useState('json');
   const [stats, setStats] = useState({});
   const [health, setHealth] = useState({});
-  const [restoreModalVisible, setRestoreModalVisible] = useState(false);
-  const [selectedBackup, setSelectedBackup] = useState(null);
   const [cleanupLoading, setCleanupLoading] = useState(false);
 
   const API_BASE_URL = 'http://localhost:5000';
@@ -111,21 +109,6 @@ const Maintenance = () => {
     }
   };
 
-  // Auto backup
-  const createAutoBackup = async () => {
-    try {
-      const response = await axios.post(`${API_BASE_URL}/backups/auto`);
-      message.success(response.data.message);
-      if (response.data.cleanup?.deleted > 0) {
-        message.info(`Cleaned up ${response.data.cleanup.deleted} old backups`);
-      }
-      fetchBackups();
-    } catch (error) {
-      message.error('Auto backup failed');
-      console.error('Auto backup error:', error);
-    }
-  };
-
   // Download backup
   const downloadBackup = (filename) => {
     try {
@@ -161,34 +144,6 @@ const Maintenance = () => {
         }
       }
     });
-  };
-
-  // Restore backup
-  const restoreBackup = async (filename) => {
-    try {
-      const response = await axios.post(`${API_BASE_URL}/backups/restore/${filename}`);
-      message.success(response.data.message);
-      setRestoreModalVisible(false);
-      setSelectedBackup(null);
-      
-      // Show restore results
-      if (response.data.results) {
-        const { restored, errors, totalRestored } = response.data.results;
-        const successCount = Object.keys(restored).length;
-        const errorCount = Object.keys(errors).length;
-        
-        if (totalRestored > 0) {
-          message.success(`Successfully restored ${totalRestored} records across ${successCount} collections`);
-        }
-        
-        if (errorCount > 0) {
-          message.warning(`${errorCount} collections had errors during restore`);
-        }
-      }
-    } catch (error) {
-      const errorMsg = error.response?.data?.message || 'Restore failed';
-      message.error(`Restore failed: ${errorMsg}`);
-    }
   };
 
   // System health check
@@ -328,7 +283,7 @@ const Maintenance = () => {
     {
       title: 'Actions',
       key: 'actions',
-      width: 250,
+      width: 200,
       render: (_, record) => (
         <Space>
           <Tooltip title="Download Backup">
@@ -338,20 +293,6 @@ const Maintenance = () => {
               size="small"
             >
               Download
-            </Button>
-          </Tooltip>
-          
-          <Tooltip title="Restore from this backup">
-            <Button 
-              icon={<EyeOutlined />}
-              onClick={() => {
-                setSelectedBackup(record);
-                setRestoreModalVisible(true);
-              }}
-              size="small"
-              type="dashed"
-            >
-              Restore
             </Button>
           </Tooltip>
           
@@ -382,6 +323,9 @@ const Maintenance = () => {
     
     return () => clearInterval(interval);
   }, []);
+
+  // Calculate actual collection count from stats
+  const actualCollectionCount = stats.collectionStats ? Object.keys(stats.collectionStats).length : 0;
 
   return (
     <div style={{ padding: '24px' }}>
@@ -452,7 +396,7 @@ const Maintenance = () => {
               <Card>
                 <Statistic
                   title="Database Collections"
-                  value={stats.collectionsCount || 0}
+                  value={actualCollectionCount || stats.collectionsCount || 0}
                   suffix="collections"
                 />
               </Card>
@@ -571,15 +515,6 @@ const Maintenance = () => {
                   </Button>
                 </Tooltip>
                 
-                <Tooltip title="Create automated backup with cleanup">
-                  <Button 
-                    onClick={createAutoBackup}
-                    icon={<RocketOutlined />}
-                  >
-                    Auto Backup
-                  </Button>
-                </Tooltip>
-                
                 <Button 
                   onClick={getDatabaseStats}
                   icon={<DatabaseOutlined />}
@@ -619,7 +554,7 @@ const Maintenance = () => {
         {/* Collection Stats */}
         {stats.collectionStats && (
           <Col span={24}>
-            <Card title="Collection Statistics" size="small">
+            <Card title={`Collection Statistics (${actualCollectionCount} Collections)`} size="small">
               <Row gutter={[16, 16]}>
                 {Object.entries(stats.collectionStats).map(([name, count]) => (
                   <Col xs={12} sm={8} md={6} lg={4} key={name}>
@@ -685,89 +620,6 @@ const Maintenance = () => {
           </Card>
         </Col>
       </Row>
-
-      {/* Restore Confirmation Modal */}
-      <Modal
-        title={
-          <Space>
-            <EyeOutlined />
-            Confirm Database Restore
-          </Space>
-        }
-        open={restoreModalVisible}
-        onCancel={() => {
-          setRestoreModalVisible(false);
-          setSelectedBackup(null);
-        }}
-        footer={[
-          <Button key="cancel" onClick={() => setRestoreModalVisible(false)}>
-            Cancel
-          </Button>,
-          <Button 
-            key="restore" 
-            type="primary" 
-            danger 
-            onClick={() => selectedBackup && restoreBackup(selectedBackup.filename)}
-            icon={<EyeOutlined />}
-          >
-            I Understand - Restore Now
-          </Button>,
-        ]}
-        width={600}
-      >
-        <Alert
-          message="Critical Warning - Data Loss Risk"
-          description="This action will COMPLETELY REPLACE ALL CURRENT DATA with the backup data. All existing records will be permanently lost!"
-          type="error"
-          showIcon
-          style={{ marginBottom: 16 }}
-        />
-        
-        <Card size="small" title="Backup Details" style={{ marginBottom: 16 }}>
-          <Row gutter={16}>
-            <Col span={12}>
-              <strong>File:</strong>
-              <div style={{ fontFamily: 'monospace', fontSize: '12px' }}>
-                {selectedBackup?.filename}
-              </div>
-            </Col>
-            <Col span={12}>
-              <strong>Created:</strong>
-              <div>{selectedBackup && formatDate(selectedBackup.createdAt)}</div>
-            </Col>
-          </Row>
-          <Row gutter={16} style={{ marginTop: 8 }}>
-            <Col span={12}>
-              <strong>Size:</strong>
-              <div>{selectedBackup?.size ? formatFileSize(selectedBackup.size) : 'Unknown'}</div>
-            </Col>
-            <Col span={12}>
-              <strong>Type:</strong>
-              <div>
-                <Tag color={
-                  selectedBackup?.type === 'quick' ? 'green' : 
-                  selectedBackup?.type === 'auto' ? 'orange' : 'blue'
-                }>
-                  {selectedBackup?.type}
-                </Tag>
-              </div>
-            </Col>
-          </Row>
-        </Card>
-
-        <Alert
-          message="Recommendation"
-          description={
-            <div>
-              <div>• Create a backup of your current data before proceeding</div>
-              <div>• Ensure this is the correct backup file</div>
-              <div>• System will be unavailable during restore process</div>
-            </div>
-          }
-          type="warning"
-          showIcon
-        />
-      </Modal>
     </div>
   );
 };

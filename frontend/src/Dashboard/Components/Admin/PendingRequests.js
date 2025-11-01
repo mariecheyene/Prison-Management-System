@@ -138,7 +138,8 @@ const PendingRequests = () => {
           visitor.lastName?.toLowerCase().includes(query) ||
           visitor.firstName?.toLowerCase().includes(query) ||
           visitor.id?.toLowerCase().includes(query) ||
-          visitor.prisonerId?.toLowerCase().includes(query)
+          visitor.prisonerId?.toLowerCase().includes(query) ||
+          visitor.prisonerName?.toLowerCase().includes(query) // ADDED: Search by prisoner name
         );
         setFilteredVisitors(filtered);
       } else {
@@ -156,7 +157,8 @@ const PendingRequests = () => {
           visitor.lastName?.toLowerCase().includes(query) ||
           visitor.firstName?.toLowerCase().includes(query) ||
           visitor.id?.toLowerCase().includes(query) ||
-          visitor.prisonerId?.toLowerCase().includes(query)
+          visitor.prisonerId?.toLowerCase().includes(query) ||
+          visitor.prisonerName?.toLowerCase().includes(query) // ADDED: Search by prisoner name
         );
         setFilteredVisitors(filtered);
       } else {
@@ -263,31 +265,6 @@ const PendingRequests = () => {
   const refreshAll = () => {
     fetchAllData();
     toast.info("Data refreshed successfully!");
-  };
-
-  // Debug function to test endpoints
-  const testEndpoints = async () => {
-    try {
-      console.log('🧪 Testing endpoints...');
-      
-      const endpoints = [
-        'http://localhost:5000/pending-visitors',
-        'http://localhost:5000/pending-visitors?status=rejected',
-        'http://localhost:5000/pending-guests',
-        'http://localhost:5000/pending-guests?status=rejected'
-      ];
-      
-      for (const endpoint of endpoints) {
-        try {
-          const response = await axios.get(endpoint);
-          console.log(`✅ ${endpoint}:`, response.data.length, 'items');
-        } catch (error) {
-          console.error(`❌ ${endpoint}:`, error.message);
-        }
-      }
-    } catch (error) {
-      console.error('Test failed:', error);
-    }
   };
 
   return (
@@ -439,87 +416,91 @@ const PendingRequests = () => {
           }
         </Alert>
       ) : (
-        <Table striped bordered hover responsive className="bg-white">
-          <thead className={activeTab === 'pending' ? 'table-warning' : 'table-danger'}>
-            <tr>
-              <th>Request ID</th>
-              <th>Full Name</th>
-              <th>Gender</th>
-              <th>Age</th>
-              {requestType === 'visitors' ? (
-                <>
-                  <th>Prisoner ID</th>
-                  <th>Relationship</th>
-                </>
-              ) : (
-                <th>Visit Purpose</th>
-              )}
-              <th>Contact</th>
-              <th>Date Submitted</th>
-              {activeTab === 'rejected' && <th>Rejection Reason</th>}
-              <th style={{ width: activeTab === 'pending' ? '180px' : '100px' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {getCurrentRequests().map(request => (
-              <tr key={request._id}>
-                <td><strong>{request.id}</strong></td>
-                <td>{request.fullName}</td>
-                <td>{request.sex}</td>
-                <td>{calculateAge(request.dateOfBirth)}</td>
+        <div className="table-responsive" style={{ fontSize: '14px' }}>
+          <Table striped bordered hover responsive className="bg-white">
+            <thead className={activeTab === 'pending' ? 'table-warning' : 'table-danger'}>
+              <tr>
+                <th className="text-center">Request ID</th>
+                <th className="text-center">Full Name</th>
+                <th className="text-center">Gender</th>
+                <th className="text-center">Age</th>
                 {requestType === 'visitors' ? (
                   <>
-                    <td>{request.prisonerId}</td>
-                    <td>{request.relationship}</td>
+                    <th className="text-center">Inmate ID</th>
+                    <th className="text-center">Inmate Name</th> {/* ADDED: Prisoner Name Column */}
+                    <th className="text-center">Relationship</th>
                   </>
                 ) : (
-                  <td>{request.visitPurpose}</td>
+                  <th className="text-center">Visit Purpose</th>
                 )}
-                <td>{request.contact}</td>
-                <td>
-                  {new Date(request.createdAt).toLocaleDateString()}
-                </td>
-                {activeTab === 'rejected' && (
-                  <td>{request.rejectionReason || 'No reason provided'}</td>
-                )}
-                <td>
-                  <ButtonGroup size="sm">
-                    <Button 
-                      variant="outline-info" 
-                      onClick={() => handleView(request, requestType)}
-                      title="View Details"
-                    >
-                      <Eye size={14} />
-                    </Button>
-                    {activeTab === 'pending' && (
-                      <>
-                        <Button 
-                          variant="outline-success" 
-                          onClick={() => handleApprove(request.id, requestType)}
-                          disabled={isLoading}
-                          title="Approve"
-                        >
-                          <Check size={14} />
-                        </Button>
-                        <Button 
-                          variant="outline-danger" 
-                          onClick={() => openRejectModal(request, requestType)}
-                          disabled={isLoading}
-                          title="Reject"
-                        >
-                          <X size={14} />
-                        </Button>
-                      </>
-                    )}
-                  </ButtonGroup>
-                </td>
+                <th className="text-center">Contact</th>
+                <th className="text-center">Date Submitted</th>
+                {activeTab === 'rejected' && <th className="text-center">Rejection Reason</th>}
+                <th className="text-center" style={{ width: activeTab === 'pending' ? '180px' : '100px' }}>Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </Table>
+            </thead>
+            <tbody>
+              {getCurrentRequests().map(request => (
+                <tr key={request._id}>
+                  <td className="text-center"><strong>{request.id}</strong></td>
+                  <td className="text-center">{request.fullName}</td>
+                  <td className="text-center">{request.sex}</td>
+                  <td className="text-center">{calculateAge(request.dateOfBirth)}</td>
+                  {requestType === 'visitors' ? (
+                    <>
+                      <td className="text-center">{request.prisonerId}</td>
+                      <td className="text-center">{request.prisonerName || 'N/A'}</td> {/* ADDED: Prisoner Name */}
+                      <td className="text-center">{request.relationship}</td>
+                    </>
+                  ) : (
+                    <td className="text-center">{request.visitPurpose}</td>
+                  )}
+                  <td className="text-center">{request.contact}</td>
+                  <td className="text-center">
+                    {new Date(request.createdAt).toLocaleDateString()}
+                  </td>
+                  {activeTab === 'rejected' && (
+                    <td className="text-center">{request.rejectionReason || 'No reason provided'}</td>
+                  )}
+                  <td className="text-center">
+                    <ButtonGroup size="sm">
+                      <Button 
+                        variant="outline-info" 
+                        onClick={() => handleView(request, requestType)}
+                        title="View Details"
+                      >
+                        <Eye size={14} />
+                      </Button>
+                      {activeTab === 'pending' && (
+                        <>
+                          <Button 
+                            variant="outline-success" 
+                            onClick={() => handleApprove(request.id, requestType)}
+                            disabled={isLoading}
+                            title="Approve"
+                          >
+                            <Check size={14} />
+                          </Button>
+                          <Button 
+                            variant="outline-danger" 
+                            onClick={() => openRejectModal(request, requestType)}
+                            disabled={isLoading}
+                            title="Reject"
+                          >
+                            <X size={14} />
+                          </Button>
+                        </>
+                      )}
+                    </ButtonGroup>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </div>
       )}
 
-      {/* View Modal - Same as before */}
+      {/* View Modal - Updated with Prisoner Name */}
       <Modal show={showModal} onHide={() => setShowModal(false)} size="lg">
         <Modal.Header closeButton>
           <Modal.Title>
@@ -570,7 +551,8 @@ const PendingRequests = () => {
                   <Card.Body>
                     {selectedRequest.type === 'visitors' ? (
                       <>
-                        <p><strong>Prisoner ID:</strong> {selectedRequest.prisonerId}</p>
+                        <p><strong>Inmate ID:</strong> {selectedRequest.prisonerId}</p>
+                        <p><strong>Inmate Name:</strong> {selectedRequest.prisonerName || 'N/A'}</p> {/* ADDED: Prisoner Name */}
                         <p><strong>Relationship:</strong> {selectedRequest.relationship}</p>
                       </>
                     ) : (

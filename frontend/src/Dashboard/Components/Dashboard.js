@@ -227,11 +227,13 @@ const Dashboard = () => {
     const data = [
       { 
         name: 'Visitors', 
-        value: visitsFromLogs.visitors > 0 ? visitsFromLogs.visitors : visitorVisits 
+        value: visitsFromLogs.visitors > 0 ? visitsFromLogs.visitors : visitorVisits,
+        count: visitsFromLogs.visitors > 0 ? visitsFromLogs.visitors : visitorVisits
       },
       { 
         name: 'Guests', 
-        value: visitsFromLogs.guests > 0 ? visitsFromLogs.guests : guestVisits 
+        value: visitsFromLogs.guests > 0 ? visitsFromLogs.guests : guestVisits,
+        count: visitsFromLogs.guests > 0 ? visitsFromLogs.guests : guestVisits
       }
     ];
 
@@ -243,10 +245,10 @@ const Dashboard = () => {
     console.log('🕒 Processing time of day data from visit logs:', visitLogs);
     
     const timeSlots = [
-      { name: 'Morning\n(6AM-12PM)', range: [6, 11], count: 0 },
-      { name: 'Afternoon\n(12PM-6PM)', range: [12, 17], count: 0 },
-      { name: 'Evening\n(6PM-12AM)', range: [18, 23], count: 0 },
-      { name: 'Night\n(12AM-6AM)', range: [0, 5], count: 0 }
+      { name: 'Morning (6AM-12PM)', range: [6, 11], count: 0 },
+      { name: 'Afternoon (12PM-6PM)', range: [12, 17], count: 0 },
+      { name: 'Evening (6PM-12AM)', range: [18, 23], count: 0 },
+      { name: 'Night (12AM-6AM)', range: [0, 5], count: 0 }
     ];
 
     let processedCount = 0;
@@ -332,7 +334,8 @@ const Dashboard = () => {
 
     const data = timeSlots.map(slot => ({
       name: slot.name,
-      visits: slot.count
+      visits: slot.count,
+      timeSlot: slot.name
     }));
 
     return data;
@@ -365,11 +368,13 @@ const Dashboard = () => {
       { 
         name: 'Male', 
         value: Math.max(maleVisitors, maleVisitLogs),
+        count: Math.max(maleVisitors, maleVisitLogs),
         color: COLORS.info // Blue for male
       },
       { 
         name: 'Female', 
         value: Math.max(femaleVisitors, femaleVisitLogs),
+        count: Math.max(femaleVisitors, femaleVisitLogs),
         color: COLORS.danger // Red for female
       }
     ];
@@ -378,7 +383,7 @@ const Dashboard = () => {
     return data;
   };
 
-  // Custom Tooltip for charts
+  // Custom Tooltip for charts - FIXED VERSION
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
@@ -390,17 +395,54 @@ const Dashboard = () => {
           boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
         }}>
           <p className="label" style={{ margin: 0, fontWeight: 'bold', color: COLORS.dark }}>
-            {`${label}`}
+            {`${label || payload[0]?.name || 'Data'}`}
           </p>
           {payload.map((entry, index) => (
             <p key={index} style={{ 
               margin: '5px 0 0 0', 
-              color: entry.color,
+              color: entry.color || CHART_COLORS[index % CHART_COLORS.length],
               fontWeight: 'bold'
             }}>
               {`${entry.name || 'Visits'}: ${entry.value}`}
             </p>
           ))}
+        </div>
+      );
+    }
+    return null;
+  };
+
+  // Custom Tooltip specifically for Pie Charts
+  const PieChartTooltip = ({ active, payload }) => {
+    if (active && payload && payload.length) {
+      const data = payload[0];
+      return (
+        <div className="custom-tooltip" style={{
+          backgroundColor: 'white',
+          padding: '10px',
+          border: `1px solid ${COLORS.gray}`,
+          borderRadius: '5px',
+          boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
+        }}>
+          <p style={{ margin: 0, fontWeight: 'bold', color: COLORS.dark }}>
+            {data.name}
+          </p>
+          <p style={{ 
+            margin: '5px 0 0 0', 
+            color: data.color,
+            fontWeight: 'bold'
+          }}>
+            {`Visits: ${data.value}`}
+          </p>
+          {data.payload.count && (
+            <p style={{ 
+              margin: '2px 0 0 0', 
+              color: COLORS.gray,
+              fontSize: '0.8rem'
+            }}>
+              {`Count: ${data.payload.count}`}
+            </p>
+          )}
         </div>
       );
     }
@@ -1067,7 +1109,7 @@ const Dashboard = () => {
                           <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip content={<CustomTooltip />} />
+                      <Tooltip content={<PieChartTooltip />} />
                       <Legend />
                     </PieChart>
                   </ResponsiveContainer>
@@ -1120,7 +1162,7 @@ const Dashboard = () => {
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Pie>
-                      <Tooltip content={<CustomTooltip />} />
+                      <Tooltip content={<PieChartTooltip />} />
                       <Legend />
                     </PieChart>
                   </ResponsiveContainer>
@@ -1129,22 +1171,41 @@ const Dashboard = () => {
             </Col>
           </Row>
 
-          <Row className="mb-4 g-3">
-            {/* Time of Day Visits Bar Chart */}
-            <Col md={6}>
+          {/* Time of Day Chart - Full Width */}
+          <Row className="mb-4">
+            <Col md={12}>
               <Card className="shadow-sm border-0 h-100">
                 <Card.Header style={{ backgroundColor: COLORS.danger, color: 'white' }}>
                   <h6 className="mb-0">Visits by Time of Day</h6>
                 </Card.Header>
                 <Card.Body>
                   {getTimeOfDayData().some(slot => slot.visits > 0) ? (
-                    <ResponsiveContainer width="100%" height={250}>
-                      <BarChart data={getTimeOfDayData()}>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart 
+                        data={getTimeOfDayData()}
+                        margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+                      >
                         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.light} />
-                        <XAxis dataKey="name" stroke={COLORS.dark} />
-                        <YAxis stroke={COLORS.dark} />
+                        <XAxis 
+                          dataKey="name" 
+                          stroke={COLORS.dark}
+                          interval={0}
+                          angle={-45}
+                          textAnchor="end"
+                          height={80}
+                          tick={{ fontSize: 12 }}
+                        />
+                        <YAxis 
+                          stroke={COLORS.dark}
+                          tick={{ fontSize: 12 }}
+                        />
                         <Tooltip content={<CustomTooltip />} />
-                        <Bar dataKey="visits" fill={COLORS.secondary} radius={[4, 4, 0, 0]} />
+                        <Bar 
+                          dataKey="visits" 
+                          fill={COLORS.secondary} 
+                          radius={[4, 4, 0, 0]}
+                          barSize={40}
+                        />
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (

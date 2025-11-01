@@ -204,6 +204,7 @@ const pendingVisitorSchema = new mongoose.Schema({
   
   // Visitation details
   prisonerId: { type: String, required: true },
+  prisonerName: String, 
   relationship: String,
   
   // Status
@@ -244,6 +245,7 @@ const visitorSchema = new mongoose.Schema({
   
   // Visitation details
   prisonerId: { type: String, required: true, ref: 'Inmate' },
+  prisonerName: { type: String, required: true },
   relationship: String,
   
   // Time tracking fields (for current session)
@@ -479,6 +481,54 @@ const visitLogSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 const VisitLog = mongoose.model('VisitLog', visitLogSchema);
+
+// Log Schema
+const logSchema = new mongoose.Schema({
+  timestamp: { type: Date, default: Date.now },
+  module: { type: String, required: true },
+  action: { type: String, required: true },
+  user: { type: String, required: true },
+  userId: { type: String, required: true },
+  description: { type: String, required: true },
+  ipAddress: String,
+  status: { type: String, enum: ['success', 'error'], default: 'success' },
+  metadata: mongoose.Schema.Types.Mixed
+}, { timestamps: true });
+
+const Log = mongoose.model('Log', logSchema);
+
+// Logging middleware (add this after your existing routes)
+const logActivity = async (req, res, next) => {
+  const originalSend = res.send;
+  
+  res.send = function(data) {
+    // Log successful operations
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      const logData = {
+        module: getModuleFromRoute(req.route.path),
+        action: getActionFromMethod(req.method),
+        user: req.user?.name || 'System',
+        userId: req.user?._id || 'system',
+        description: generateLogDescription(req),
+        ipAddress: req.ip || req.connection.remoteAddress,
+        status: 'success',
+        metadata: {
+          route: req.route.path,
+          method: req.method,
+          params: req.params,
+          query: req.query
+        }
+      };
+      
+      // Don't await to avoid blocking response
+      new Log(logData).save().catch(console.error);
+    }
+    
+    originalSend.call(this, data);
+  };
+  
+  next();
+};
 
 // ======================
 // VISIT HISTORY ENDPOINTS
@@ -871,26 +921,27 @@ app.put("/visitors/:id/approve-time-in", async (req, res) => {
       visitLogId: visitLog._id
     };
 
-    // Update visitor - REMOVED lastVisitDate from time-in!
-    const updatedVisitor = await Visitor.findOneAndUpdate(
-      { id: req.params.id },
-      {
-        $set: {
-          hasTimedIn: true,
-          hasTimedOut: false,
-          timeIn: currentTime,
-          timeOut: null,
-          isTimerActive: true,
-          timerStart: timerStart,
-          timerEnd: timerEnd,
-          dateVisited: today,        // Keep current visit date
-          lastActiveDate: today      // Keep for daily tracking
-          // REMOVED: lastVisitDate: today ← Don't set here!
-        },
-        $push: { dailyVisits: newVisit }
-      },
-      { new: true }
-    );
+
+// UPDATE VISITOR - ALL date fields updated during time-in
+const updatedVisitor = await Visitor.findOneAndUpdate(
+  { id: req.params.id },
+  {
+    $set: {
+      hasTimedIn: true,
+      hasTimedOut: false,
+      timeIn: currentTime,
+      timeOut: null,
+      isTimerActive: true,
+      timerStart: timerStart,
+      timerEnd: timerEnd,
+      dateVisited: today,        // Current visit date
+      lastActiveDate: today,     // For daily limits
+      lastVisitDate: today       // ADDED: For visit history tracking
+    },
+    $push: { dailyVisits: newVisit }
+  },
+  { new: true }
+);
 
     const visitorWithFullName = {
       ...updatedVisitor.toObject(),
@@ -1102,24 +1153,24 @@ app.put("/guests/:id/approve-time-in", async (req, res) => {
     );
 
     const updatedGuest = await Guest.findOneAndUpdate(
-      { id: req.params.id },
-      {
-        $set: {
-          hasTimedIn: true,
-          hasTimedOut: false,
-          timeIn: currentTime,
-          timeOut: null,
-          dateVisited: today,        // Keep current visit date
-          lastActiveDate: today,     // Keep for daily tracking
-          status: 'approved'
-          // REMOVED: lastVisitDate: today ← Don't set here!
-        },
-        $push: { 
-          dailyVisits: newVisit 
-        }
-      },
-      { new: true }
-    );
+  { id: req.params.id },
+  {
+    $set: {
+      hasTimedIn: true,
+      hasTimedOut: false,
+      timeIn: currentTime,
+      timeOut: null,
+      dateVisited: today,        // Current visit date
+      lastActiveDate: today,     // For daily limits
+      lastVisitDate: today,      // ADDED: For visit history tracking
+      status: 'approved'
+    },
+    $push: { 
+      dailyVisits: newVisit 
+    }
+  },
+  { new: true }
+);
 
     console.log('✅ Guest updated successfully');
 
@@ -1381,7 +1432,7 @@ app.put("/guests/:id/remove-violation", async (req, res) => {
   }
 });
 
-// Ban visitor
+// Ban visitor - FIXED SPELLING
 app.put("/visitors/:id/ban", async (req, res) => {
   try {
     const { reason, duration, notes, isBanned = true } = req.body;
@@ -1393,7 +1444,7 @@ app.put("/visitors/:id/ban", async (req, res) => {
         banReason: reason,
         banDuration: duration,
         banNotes: notes,
-        violationType: 'Ban',
+        violationType: 'Banned', // ← Make sure it's exactly "Banned"
         violationDetails: reason || 'Banned by administrator'
       },
       { new: true }
@@ -1413,7 +1464,7 @@ app.put("/visitors/:id/ban", async (req, res) => {
   }
 });
 
-// Ban guest
+// Ban guest - FIXED SPELLING
 app.put("/guests/:id/ban", async (req, res) => {
   try {
     const { reason, duration, notes, isBanned = true } = req.body;
@@ -1425,7 +1476,7 @@ app.put("/guests/:id/ban", async (req, res) => {
         banReason: reason,
         banDuration: duration,
         banNotes: notes,
-        violationType: 'Ban',
+        violationType: 'Banned', // ← Make sure it's exactly "Banned"
         violationDetails: reason || 'Banned by administrator'
       },
       { new: true }
@@ -2227,9 +2278,27 @@ app.post("/visitors",
       const seq = await autoIncrement('visitorId');
       const id = `VIS${seq}`;
 
+      // Validate prisonerId exists and get prisoner name
+      let prisonerName = 'Unknown';
+      if (req.body.prisonerId) {
+        const inmate = await Inmate.findOne({ inmateCode: req.body.prisonerId });
+        if (inmate) {
+          prisonerName = inmate.fullName;
+        } else {
+          return res.status(400).json({ 
+            message: `Prisoner with ID ${req.body.prisonerId} not found` 
+          });
+        }
+      } else {
+        return res.status(400).json({ 
+          message: "Prisoner ID is required" 
+        });
+      }
+
       const visitorData = {
         ...req.body,
         id,
+        prisonerName: prisonerName, // Store prisoner name
         dateOfBirth: req.body.dateOfBirth ? new Date(req.body.dateOfBirth) : null,
         hasTimedIn: false,
         hasTimedOut: false,
@@ -2255,7 +2324,8 @@ app.post("/visitors",
         firstName: visitorData.firstName,
         middleName: visitorData.middleName,
         extension: visitorData.extension,
-        prisonerId: visitorData.prisonerId
+        prisonerId: visitorData.prisonerId,
+        prisonerName: prisonerName
       };
       visitorData.qrCode = await generateQRCode(qrData);
 
@@ -2301,6 +2371,7 @@ app.get("/visitors", async (req, res) => {
   }
 });
 
+
 // GET SINGLE VISITOR
 app.get("/visitors/:id", async (req, res) => {
   try {
@@ -2323,7 +2394,22 @@ app.put("/visitors/:id",
   async (req, res) => {
     try {
       const updateData = { ...req.body };
-      if (req.file) updateData.photo = req.file.filename;
+
+      // If prisonerId is being updated, get the new prisoner name
+      if (updateData.prisonerId) {
+        const inmate = await Inmate.findOne({ inmateCode: updateData.prisonerId });
+        if (inmate) {
+          updateData.prisonerName = inmate.fullName;
+        } else {
+          return res.status(400).json({ 
+            message: `Prisoner with ID ${updateData.prisonerId} not found` 
+          });
+        }
+      }
+
+      if (req.file) {
+        updateData.photo = req.file.filename;
+      }
 
       const visitor = await Visitor.findOne({ id: req.params.id });
       if (!visitor) return res.status(404).json({ message: "Visitor not found" });
@@ -2510,14 +2596,782 @@ app.delete("/guests/:id", async (req, res) => {
   }
 });
 
+
+
 // ======================
-// IMPORT AND EXPORTS
+// VISITORS IMPORT ENDPOINTS 
 // ======================
 
-// IMPROVED GUEST IMPORT ENDPOINT
+// Import visitors from CSV - WITH GENDER TO SEX MAPPING
+app.post("/visitors/upload-csv", upload.single('csvFile'), async (req, res) => {
+  try {
+    console.log('🔄 Starting visitor CSV import process...');
+    
+    if (!req.file) {
+      return res.status(400).json({ message: 'No CSV file uploaded' });
+    }
+
+    console.log('📁 File received:', req.file.originalname);
+
+    const visitors = [];
+    const errors = [];
+
+    // Read and parse CSV file
+    const fileContent = fs.readFileSync(req.file.path, 'utf8');
+    console.log('📄 File content length:', fileContent.length);
+
+    const results = Papa.parse(fileContent, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim(),
+      complete: (results) => {
+        console.log('✅ CSV parsing completed, rows:', results.data.length);
+      },
+      error: (error) => {
+        console.error('❌ CSV parsing error:', error);
+      }
+    });
+
+    if (results.errors && results.errors.length > 0) {
+      console.error('CSV parsing errors:', results.errors);
+      return res.status(400).json({ 
+        message: 'Invalid CSV format', 
+        errors: results.errors 
+      });
+    }
+
+    console.log('🔍 Processing CSV rows...');
+    
+    for (const [index, row] of results.data.entries()) {
+      try {
+        console.log(`📝 Processing row ${index + 1}:`, row);
+
+        // Map CSV headers to database fields - FLEXIBLE HEADER HANDLING
+        const fieldMap = {
+          // Support multiple possible header names
+          'Last Name': 'lastName',
+          'LastName': 'lastName',
+          'Last_Name': 'lastName',
+          'lastName': 'lastName',
+          
+          'First Name': 'firstName', 
+          'FirstName': 'firstName',
+          'First_Name': 'firstName',
+          'firstName': 'firstName',
+          
+          'Middle Name': 'middleName',
+          'MiddleName': 'middleName', 
+          'Middle_Name': 'middleName',
+          'middleName': 'middleName',
+          
+          'Extension': 'extension',
+          'extension': 'extension',
+          
+          'Date of Birth': 'dateOfBirth',
+          'DateOfBirth': 'dateOfBirth',
+          'Date_of_Birth': 'dateOfBirth',
+          'DOB': 'dateOfBirth',
+          'dateOfBirth': 'dateOfBirth',
+          
+          // GENDER FIELD - Accept multiple header names but store as 'sex'
+          'Gender': 'sex',
+          'gender': 'sex', 
+          'Sex': 'sex',
+          'sex': 'sex',
+          
+          'Address': 'address',
+          'address': 'address',
+          
+          'Contact': 'contact',
+          'Contact Number': 'contact',
+          'ContactNumber': 'contact',
+          'Phone': 'contact',
+          'contact': 'contact',
+          
+          'Inmate ID': 'prisonerId',
+          'InmateID': 'prisonerId',
+          'Inmate_ID': 'prisonerId',
+          'Prisoner ID': 'prisonerId',
+          'PrisonerID': 'prisonerId',
+          'prisonerId': 'prisonerId',
+          
+          'Inmate Name': 'prisonerName',
+          'InmateName': 'prisonerName',
+          'Inmate_Name': 'prisonerName',
+          'Prisoner Name': 'prisonerName',
+          'PrisonerName': 'prisonerName',
+          'prisonerName': 'prisonerName',
+          
+          'Relationship': 'relationship',
+          'relationship': 'relationship'
+        };
+
+        // Extract data using field mapping
+        const extractField = (possibleHeaders) => {
+          for (const header of possibleHeaders) {
+            if (row[header] !== undefined && row[header] !== null && row[header].toString().trim() !== '') {
+              return row[header].toString().trim();
+            }
+          }
+          return '';
+        };
+
+        const lastName = extractField(['Last Name', 'LastName', 'Last_Name', 'lastName']);
+        const firstName = extractField(['First Name', 'FirstName', 'First_Name', 'firstName']);
+        const middleName = extractField(['Middle Name', 'MiddleName', 'Middle_Name', 'middleName']);
+        const extension = extractField(['Extension', 'extension']);
+        const dateOfBirthStr = extractField(['Date of Birth', 'DateOfBirth', 'Date_of_Birth', 'DOB', 'dateOfBirth']);
+        const gender = extractField(['Gender', 'gender', 'Sex', 'sex']);
+        const address = extractField(['Address', 'address']);
+        const contact = extractField(['Contact', 'Contact Number', 'ContactNumber', 'Phone', 'contact']);
+        const prisonerId = extractField(['Inmate ID', 'InmateID', 'Inmate_ID', 'Prisoner ID', 'PrisonerID', 'prisonerId']);
+        const prisonerName = extractField(['Inmate Name', 'InmateName', 'Inmate_Name', 'Prisoner Name', 'PrisonerName', 'prisonerName']);
+        const relationship = extractField(['Relationship', 'relationship']);
+
+        // Validate required fields
+        const requiredFields = [
+          { field: lastName, name: 'Last Name' },
+          { field: firstName, name: 'First Name' },
+          { field: gender, name: 'Gender' },
+          { field: dateOfBirthStr, name: 'Date of Birth' },
+          { field: address, name: 'Address' },
+          { field: contact, name: 'Contact' },
+          { field: prisonerId, name: 'Inmate ID' },
+          { field: relationship, name: 'Relationship' }
+        ];
+
+        const missingFields = requiredFields.filter(item => !item.field).map(item => item.name);
+        
+        if (missingFields.length > 0) {
+          errors.push({
+            row: index + 2,
+            error: `Missing required fields: ${missingFields.join(', ')}`,
+            data: row
+          });
+          console.log(`❌ Row ${index + 2} missing fields:`, missingFields);
+          continue;
+        }
+
+        // Validate gender/sex
+        if (!['Male', 'Female'].includes(gender)) {
+          errors.push({
+            row: index + 2,
+            error: `Invalid gender: "${gender}". Must be "Male" or "Female"`,
+            data: row
+          });
+          console.log(`❌ Row ${index + 2} invalid gender:`, gender);
+          continue;
+        }
+
+        // Parse date with multiple format support
+        let dateOfBirth;
+        try {
+          dateOfBirth = new Date(dateOfBirthStr);
+          if (isNaN(dateOfBirth.getTime())) {
+            // Try MM/DD/YYYY format
+            const parts = dateOfBirthStr.split('/');
+            if (parts.length === 3) {
+              dateOfBirth = new Date(parts[2], parts[0] - 1, parts[1]);
+            }
+            if (isNaN(dateOfBirth.getTime())) {
+              // Try DD-MM-YYYY format
+              const parts2 = dateOfBirthStr.split('-');
+              if (parts2.length === 3) {
+                dateOfBirth = new Date(parts2[2], parts2[1] - 1, parts2[0]);
+              }
+              if (isNaN(dateOfBirth.getTime())) {
+                throw new Error('Invalid date format');
+              }
+            }
+          }
+        } catch (dateError) {
+          errors.push({
+            row: index + 2,
+            error: `Invalid date format: "${dateOfBirthStr}". Use YYYY-MM-DD, MM/DD/YYYY, or DD-MM-YYYY`,
+            data: row
+          });
+          console.log(`❌ Row ${index + 2} date error:`, dateOfBirthStr);
+          continue;
+        }
+
+        // Calculate age
+        const today = new Date();
+        let age = today.getFullYear() - dateOfBirth.getFullYear();
+        const monthDiff = today.getMonth() - dateOfBirth.getMonth();
+        if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dateOfBirth.getDate())) {
+          age--;
+        }
+
+        // Verify prisoner exists and get prisoner name if not provided
+        let finalPrisonerName = prisonerName;
+        if (!finalPrisonerName) {
+          const inmate = await Inmate.findOne({ inmateCode: prisonerId });
+          if (inmate) {
+            finalPrisonerName = inmate.fullName;
+            console.log(`ℹ️ Row ${index + 2}: Looked up inmate name: ${finalPrisonerName}`);
+          } else {
+            errors.push({
+              row: index + 2,
+              error: `Prisoner with ID "${prisonerId}" not found and no inmate name provided`,
+              data: row
+            });
+            console.log(`❌ Row ${index + 2} prisoner not found:`, prisonerId);
+            continue;
+          }
+        }
+
+        const visitorData = {
+          lastName: lastName,
+          firstName: firstName,
+          middleName: middleName,
+          extension: extension,
+          dateOfBirth: dateOfBirth,
+          age: age.toString(),
+          sex: gender, // ✅ MAPPED FROM CSV "Gender" TO DATABASE "sex"
+          address: address,
+          contact: contact,
+          prisonerId: prisonerId,
+          prisonerName: finalPrisonerName,
+          relationship: relationship,
+          status: 'approved'
+        };
+
+        console.log(`✅ Row ${index + 2} processed successfully:`, visitorData.firstName, visitorData.lastName, `Gender: ${gender} → Sex: ${visitorData.sex}`);
+        visitors.push(visitorData);
+      } catch (rowError) {
+        console.error(`❌ Error processing row ${index + 2}:`, rowError);
+        errors.push({
+          row: index + 2,
+          error: rowError.message,
+          data: row
+        });
+      }
+    }
+
+    console.log(`📊 Processing complete: ${visitors.length} valid, ${errors.length} errors`);
+
+    // Insert visitors into database
+    const importedVisitors = [];
+    for (const visitorData of visitors) {
+      try {
+        // Generate unique visitor ID
+        const visitorSeq = await autoIncrement('visitorId');
+        const visitorId = `VIS${visitorSeq}`;
+
+        // Generate QR code
+        const qrData = {
+          id: visitorId,
+          lastName: visitorData.lastName,
+          firstName: visitorData.firstName,
+          middleName: visitorData.middleName,
+          extension: visitorData.extension,
+          prisonerId: visitorData.prisonerId,
+          prisonerName: visitorData.prisonerName,
+          type: 'visitor'
+        };
+        const qrCode = await generateQRCode(qrData);
+
+        const visitor = new Visitor({
+          ...visitorData,
+          id: visitorId,
+          qrCode: qrCode,
+          hasTimedIn: false,
+          hasTimedOut: false,
+          timeIn: null,
+          timeOut: null,
+          dateVisited: null,
+          lastVisitDate: null,
+          isTimerActive: false,
+          visitApproved: false,
+          dailyVisits: [],
+          visitHistory: [],
+          totalVisits: 0
+        });
+
+        const savedVisitor = await visitor.save();
+        importedVisitors.push(savedVisitor);
+        console.log(`✅ Saved visitor: ${visitorId} - ${visitorData.firstName} ${visitorData.lastName} (Sex: ${visitorData.sex})`);
+      } catch (error) {
+        console.error(`❌ Error saving visitor ${visitorData.firstName} ${visitorData.lastName}:`, error);
+        errors.push({
+          visitor: visitorData,
+          error: error.message
+        });
+      }
+    }
+
+    // Clean up uploaded file
+    try {
+      if (fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+        console.log('🧹 Cleaned up uploaded file');
+      }
+    } catch (cleanupError) {
+      console.warn('Could not clean up file:', cleanupError);
+    }
+
+    const result = {
+      message: 'Import completed',
+      imported: importedVisitors.length,
+      errors: errors,
+      totalProcessed: visitors.length
+    };
+
+    console.log('🎉 Import final result:', result);
+    res.json(result);
+
+  } catch (error) {
+    console.error('❌ Import process error:', error);
+    
+    // Clean up file on error
+    if (req.file && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (cleanupError) {
+        console.warn('Could not clean up file on error:', cleanupError);
+      }
+    }
+    
+    res.status(500).json({ 
+      message: 'Failed to import visitors', 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+// ======================
+// INMATES IMPORT ENDPOINTS
+// ======================
+
+// Import inmates from CSV - WITH GENDER TO SEX MAPPING AND AUTO-CALCULATION
+app.post("/inmates/upload-csv", upload.single('csvFile'), async (req, res) => {
+  try {
+    console.log('🔄 Starting inmate CSV import process...');
+    
+    if (!req.file) {
+      return res.status(400).json({ message: 'No CSV file uploaded' });
+    }
+
+    console.log('📁 File received:', req.file.originalname);
+
+    const inmates = [];
+    const errors = [];
+
+    // Calculate sentence duration from dates function
+    const calculateSentenceDuration = (dateFrom, dateTo) => {
+      if (!dateFrom || !dateTo) return '';
+      
+      const from = new Date(dateFrom);
+      const to = new Date(dateTo);
+      
+      // Check if dateTo is after dateFrom
+      if (to <= from) return 'Invalid dates';
+      
+      const diffTime = Math.abs(to - from);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      const diffYears = Math.floor(diffDays / 365);
+      const diffMonths = Math.floor((diffDays % 365) / 30);
+      const remainingDays = diffDays % 30;
+
+      let sentenceParts = [];
+      if (diffYears > 0) sentenceParts.push(`${diffYears} year${diffYears > 1 ? 's' : ''}`);
+      if (diffMonths > 0) sentenceParts.push(`${diffMonths} month${diffMonths > 1 ? 's' : ''}`);
+      if (remainingDays > 0) sentenceParts.push(`${remainingDays} day${remainingDays > 1 ? 's' : ''}`);
+      
+      return sentenceParts.length > 0 ? `${sentenceParts.join(' ')} imprisonment` : '';
+    };
+
+    // Read and parse CSV file
+    const fileContent = fs.readFileSync(req.file.path, 'utf8');
+    console.log('📄 File content length:', fileContent.length);
+
+    const results = Papa.parse(fileContent, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim(),
+      complete: (results) => {
+        console.log('✅ CSV parsing completed, rows:', results.data.length);
+      },
+      error: (error) => {
+        console.error('❌ CSV parsing error:', error);
+      }
+    });
+
+    if (results.errors && results.errors.length > 0) {
+      console.error('CSV parsing errors:', results.errors);
+      return res.status(400).json({ 
+        message: 'Invalid CSV format', 
+        errors: results.errors 
+      });
+    }
+
+    console.log('🔍 Processing CSV rows...');
+    
+    for (const [index, row] of results.data.entries()) {
+      try {
+        console.log(`📝 Processing row ${index + 1}:`, row);
+
+        // Map CSV headers to database fields - FLEXIBLE HEADER HANDLING
+        const fieldMap = {
+          // Support multiple possible header names
+          'Last Name': 'lastName',
+          'LastName': 'lastName',
+          'Last_Name': 'lastName',
+          'lastName': 'lastName',
+          
+          'First Name': 'firstName', 
+          'FirstName': 'firstName',
+          'First_Name': 'firstName',
+          'firstName': 'firstName',
+          
+          'Middle Name': 'middleName',
+          'MiddleName': 'middleName', 
+          'Middle_Name': 'middleName',
+          'middleName': 'middleName',
+          
+          'Extension': 'extension',
+          'extension': 'extension',
+          
+          'Date of Birth': 'dateOfBirth',
+          'DateOfBirth': 'dateOfBirth',
+          'Date_of_Birth': 'dateOfBirth',
+          'DOB': 'dateOfBirth',
+          'dateOfBirth': 'dateOfBirth',
+          
+          // GENDER FIELD - Accept multiple header names but store as 'sex'
+          'Gender': 'sex',
+          'gender': 'sex', 
+          'Sex': 'sex',
+          'sex': 'sex',
+          
+          'Address': 'address',
+          'address': 'address',
+          
+          'Marital Status': 'maritalStatus',
+          'MaritalStatus': 'maritalStatus',
+          'Marital_Status': 'maritalStatus',
+          'maritalStatus': 'maritalStatus',
+          
+          'Eye Color': 'eyeColor',
+          'EyeColor': 'eyeColor',
+          'Eye_Color': 'eyeColor',
+          'eyeColor': 'eyeColor',
+          
+          'Complexion': 'complexion',
+          'complexion': 'complexion',
+          
+          'Cell ID': 'cellId',
+          'CellID': 'cellId',
+          'Cell_ID': 'cellId',
+          'cellId': 'cellId',
+          
+          'Sentence': 'sentence',
+          'sentence': 'sentence',
+          
+          'Date From': 'dateFrom',
+          'DateFrom': 'dateFrom',
+          'Date_From': 'dateFrom',
+          'dateFrom': 'dateFrom',
+          
+          'Date To': 'dateTo',
+          'DateTo': 'dateTo',
+          'Date_To': 'dateTo',
+          'dateTo': 'dateTo',
+          
+          'Crime': 'crime',
+          'crime': 'crime',
+          
+          'Emergency Name': 'emergencyName',
+          'EmergencyName': 'emergencyName',
+          'Emergency_Name': 'emergencyName',
+          'emergencyName': 'emergencyName',
+          
+          'Emergency Contact': 'emergencyContact',
+          'EmergencyContact': 'emergencyContact',
+          'Emergency_Contact': 'emergencyContact',
+          'emergencyContact': 'emergencyContact',
+          
+          'Emergency Relation': 'emergencyRelation',
+          'EmergencyRelation': 'emergencyRelation',
+          'Emergency_Relation': 'emergencyRelation',
+          'emergencyRelation': 'emergencyRelation',
+          
+          'Status': 'status',
+          'status': 'status'
+        };
+
+        // Extract data using field mapping
+        const extractField = (possibleHeaders) => {
+          for (const header of possibleHeaders) {
+            if (row[header] !== undefined && row[header] !== null && row[header].toString().trim() !== '') {
+              return row[header].toString().trim();
+            }
+          }
+          return '';
+        };
+
+        const lastName = extractField(['Last Name', 'LastName', 'Last_Name', 'lastName']);
+        const firstName = extractField(['First Name', 'FirstName', 'First_Name', 'firstName']);
+        const middleName = extractField(['Middle Name', 'MiddleName', 'Middle_Name', 'middleName']);
+        const extension = extractField(['Extension', 'extension']);
+        const dateOfBirthStr = extractField(['Date of Birth', 'DateOfBirth', 'Date_of_Birth', 'DOB', 'dateOfBirth']);
+        const gender = extractField(['Gender', 'gender', 'Sex', 'sex']);
+        const address = extractField(['Address', 'address']);
+        const maritalStatus = extractField(['Marital Status', 'MaritalStatus', 'Marital_Status', 'maritalStatus']);
+        const eyeColor = extractField(['Eye Color', 'EyeColor', 'Eye_Color', 'eyeColor']);
+        const complexion = extractField(['Complexion', 'complexion']);
+        const cellId = extractField(['Cell ID', 'CellID', 'Cell_ID', 'cellId']);
+        const sentence = extractField(['Sentence', 'sentence']);
+        const dateFromStr = extractField(['Date From', 'DateFrom', 'Date_From', 'dateFrom']);
+        const dateToStr = extractField(['Date To', 'DateTo', 'Date_To', 'dateTo']);
+        const crime = extractField(['Crime', 'crime']);
+        const emergencyName = extractField(['Emergency Name', 'EmergencyName', 'Emergency_Name', 'emergencyName']);
+        const emergencyContact = extractField(['Emergency Contact', 'EmergencyContact', 'Emergency_Contact', 'emergencyContact']);
+        const emergencyRelation = extractField(['Emergency Relation', 'EmergencyRelation', 'Emergency_Relation', 'emergencyRelation']);
+        const status = extractField(['Status', 'status']);
+
+        // Validate required fields
+        const requiredFields = [
+          { field: lastName, name: 'Last Name' },
+          { field: firstName, name: 'First Name' },
+          { field: gender, name: 'Gender' },
+          { field: dateOfBirthStr, name: 'Date of Birth' },
+          { field: address, name: 'Address' },
+          { field: cellId, name: 'Cell ID' },
+          { field: crime, name: 'Crime' }
+        ];
+
+        const missingFields = requiredFields.filter(item => !item.field).map(item => item.name);
+        
+        if (missingFields.length > 0) {
+          errors.push({
+            row: index + 2,
+            error: `Missing required fields: ${missingFields.join(', ')}`,
+            data: row
+          });
+          console.log(`❌ Row ${index + 2} missing fields:`, missingFields);
+          continue;
+        }
+
+        // Validate gender/sex
+        if (!['Male', 'Female'].includes(gender)) {
+          errors.push({
+            row: index + 2,
+            error: `Invalid gender: "${gender}". Must be "Male" or "Female"`,
+            data: row
+          });
+          console.log(`❌ Row ${index + 2} invalid gender:`, gender);
+          continue;
+        }
+
+        // Parse date with multiple format support
+        const parseDate = (dateStr) => {
+          if (!dateStr) return null;
+          
+          let date = new Date(dateStr);
+          if (isNaN(date.getTime())) {
+            // Try MM/DD/YYYY format
+            const parts = dateStr.split('/');
+            if (parts.length === 3) {
+              date = new Date(parts[2], parts[0] - 1, parts[1]);
+            }
+            if (isNaN(date.getTime())) {
+              // Try DD-MM-YYYY format
+              const parts2 = dateStr.split('-');
+              if (parts2.length === 3) {
+                date = new Date(parts2[2], parts2[1] - 1, parts2[0]);
+              }
+              if (isNaN(date.getTime())) {
+                throw new Error('Invalid date format');
+              }
+            }
+          }
+          return date;
+        };
+
+        let dateOfBirth, dateFrom, dateTo;
+        
+        try {
+          dateOfBirth = parseDate(dateOfBirthStr);
+          if (isNaN(dateOfBirth.getTime())) {
+            throw new Error('Invalid date format');
+          }
+        } catch (dateError) {
+          errors.push({
+            row: index + 2,
+            error: `Invalid date of birth format: "${dateOfBirthStr}". Use YYYY-MM-DD, MM/DD/YYYY, or DD-MM-YYYY`,
+            data: row
+          });
+          console.log(`❌ Row ${index + 2} date error:`, dateOfBirthStr);
+          continue;
+        }
+
+        // Parse optional dates
+        try {
+          dateFrom = dateFromStr ? parseDate(dateFromStr) : null;
+          if (dateFromStr && isNaN(dateFrom.getTime())) {
+            throw new Error('Invalid date format');
+          }
+        } catch (dateError) {
+          errors.push({
+            row: index + 2,
+            error: `Invalid date from format: "${dateFromStr}". Use YYYY-MM-DD, MM/DD/YYYY, or DD-MM-YYYY`,
+            data: row
+          });
+          continue;
+        }
+
+        try {
+          dateTo = dateToStr ? parseDate(dateToStr) : null;
+          if (dateToStr && isNaN(dateTo.getTime())) {
+            throw new Error('Invalid date format');
+          }
+        } catch (dateError) {
+          errors.push({
+            row: index + 2,
+            error: `Invalid date to format: "${dateToStr}". Use YYYY-MM-DD, MM/DD/YYYY, or DD-MM-YYYY`,
+            data: row
+          });
+          continue;
+        }
+
+        // Validate dates relationship
+        if (dateFrom && dateTo && dateTo <= dateFrom) {
+          errors.push({
+            row: index + 2,
+            error: `Date To (${dateToStr}) must be after Date From (${dateFromStr})`,
+            data: row
+          });
+          console.log(`❌ Row ${index + 2} invalid date range:`, dateFromStr, dateToStr);
+          continue;
+        }
+
+        // Validate status
+        const validStatus = status && ['active', 'inactive', 'released', 'transferred'].includes(status.toLowerCase()) 
+          ? status.toLowerCase() 
+          : 'active';
+
+        // AUTO-CALCULATE SENTENCE IF NOT PROVIDED BUT DATES ARE AVAILABLE
+        let finalSentence = sentence;
+        if (!sentence && dateFrom && dateTo) {
+          finalSentence = calculateSentenceDuration(dateFrom, dateTo);
+          console.log(`🔢 Row ${index + 2} auto-calculated sentence:`, finalSentence);
+        }
+
+        const inmateData = {
+          lastName: lastName,
+          firstName: firstName,
+          middleName: middleName,
+          extension: extension,
+          dateOfBirth: dateOfBirth,
+          sex: gender, // ✅ MAPPED FROM CSV "Gender" TO DATABASE "sex"
+          address: address,
+          maritalStatus: maritalStatus,
+          eyeColor: eyeColor,
+          complexion: complexion,
+          cellId: cellId,
+          sentence: finalSentence, // ✅ Uses provided sentence OR auto-calculated
+          dateFrom: dateFrom,
+          dateTo: dateTo,
+          crime: crime,
+          emergencyName: emergencyName,
+          emergencyContact: emergencyContact,
+          emergencyRelation: emergencyRelation,
+          status: validStatus
+        };
+
+        console.log(`✅ Row ${index + 2} processed successfully:`, 
+          inmateData.firstName, inmateData.lastName, 
+          `Gender: ${gender} → Sex: ${inmateData.sex}`,
+          `Sentence: "${finalSentence || 'Not provided'}"`
+        );
+        inmates.push(inmateData);
+      } catch (rowError) {
+        console.error(`❌ Error processing row ${index + 2}:`, rowError);
+        errors.push({
+          row: index + 2,
+          error: rowError.message,
+          data: row
+        });
+      }
+    }
+
+    console.log(`📊 Processing complete: ${inmates.length} valid, ${errors.length} errors`);
+
+    // Insert inmates into database
+    const importedInmates = [];
+    for (const inmateData of inmates) {
+      try {
+        // Generate unique inmate code
+        const inmateSeq = await autoIncrement('inmateCode');
+        const inmateCode = `INM${inmateSeq}`;
+
+        const inmate = new Inmate({
+          ...inmateData,
+          inmateCode: inmateCode
+        });
+
+        const savedInmate = await inmate.save();
+        importedInmates.push(savedInmate);
+        console.log(`✅ Saved inmate: ${inmateCode} - ${inmateData.firstName} ${inmateData.lastName} (Sex: ${inmateData.sex}, Sentence: "${inmateData.sentence || 'None'}")`);
+      } catch (error) {
+        console.error(`❌ Error saving inmate ${inmateData.firstName} ${inmateData.lastName}:`, error);
+        errors.push({
+          inmate: inmateData,
+          error: error.message
+        });
+      }
+    }
+
+    // Clean up uploaded file
+    try {
+      if (fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+        console.log('🧹 Cleaned up uploaded file');
+      }
+    } catch (cleanupError) {
+      console.warn('Could not clean up file:', cleanupError);
+    }
+
+    const result = {
+      message: 'Import completed',
+      imported: importedInmates.length,
+      errors: errors,
+      totalProcessed: inmates.length
+    };
+
+    console.log('🎉 Import final result:', result);
+    res.json(result);
+
+  } catch (error) {
+    console.error('❌ Import process error:', error);
+    
+    // Clean up file on error
+    if (req.file && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (cleanupError) {
+        console.warn('Could not clean up file on error:', cleanupError);
+      }
+    }
+    
+    res.status(500).json({ 
+      message: 'Failed to import inmates', 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+// ======================
+// GUESTS IMPORT ENDPOINTS 
+// ======================
+
+// Import guests from CSV - WITH GENDER TO SEX MAPPING AND AUTO-AGE CALCULATION
 app.post("/guests/import", upload.single('csvFile'), async (req, res) => {
   try {
-    console.log('🔄 Starting guest import process...');
+    console.log('🔄 Starting guest CSV import process...');
     
     if (!req.file) {
       return res.status(400).json({ message: 'No CSV file uploaded' });
@@ -2558,9 +3412,38 @@ app.post("/guests/import", upload.single('csvFile'), async (req, res) => {
       try {
         console.log(`📝 Processing row ${index + 1}:`, row);
 
+        // Extract data using flexible header mapping
+        const extractField = (possibleHeaders) => {
+          for (const header of possibleHeaders) {
+            if (row[header] !== undefined && row[header] !== null && row[header].toString().trim() !== '') {
+              return row[header].toString().trim();
+            }
+          }
+          return '';
+        };
+
+        const lastName = extractField(['Last Name', 'LastName', 'Last_Name', 'lastName']);
+        const firstName = extractField(['First Name', 'FirstName', 'First_Name', 'firstName']);
+        const middleName = extractField(['Middle Name', 'MiddleName', 'Middle_Name', 'middleName']);
+        const extension = extractField(['Extension', 'extension']);
+        const dateOfBirthStr = extractField(['Date of Birth', 'DateOfBirth', 'Date_of_Birth', 'DOB', 'dateOfBirth']);
+        const gender = extractField(['Gender', 'gender', 'Sex', 'sex']);
+        const address = extractField(['Address', 'address']);
+        const contact = extractField(['Contact', 'Contact Number', 'ContactNumber', 'Phone', 'contact']);
+        const visitPurpose = extractField(['Visit Purpose', 'VisitPurpose', 'Visit_Purpose', 'Purpose', 'purpose', 'visitPurpose']);
+
         // Validate required fields
-        const requiredFields = ['lastName', 'firstName', 'sex', 'dateOfBirth', 'address', 'contact', 'visitPurpose'];
-        const missingFields = requiredFields.filter(field => !row[field] || row[field].trim() === '');
+        const requiredFields = [
+          { field: lastName, name: 'Last Name' },
+          { field: firstName, name: 'First Name' },
+          { field: gender, name: 'Gender' },
+          { field: dateOfBirthStr, name: 'Date of Birth' },
+          { field: address, name: 'Address' },
+          { field: contact, name: 'Contact' },
+          { field: visitPurpose, name: 'Visit Purpose' }
+        ];
+
+        const missingFields = requiredFields.filter(item => !item.field).map(item => item.name);
         
         if (missingFields.length > 0) {
           errors.push({
@@ -2572,43 +3455,49 @@ app.post("/guests/import", upload.single('csvFile'), async (req, res) => {
           continue;
         }
 
-        // Validate gender
-        if (!['Male', 'Female'].includes(row.sex)) {
+        // Validate gender/sex
+        if (!['Male', 'Female'].includes(gender)) {
           errors.push({
             row: index + 2,
-            error: 'Invalid gender. Must be Male or Female',
+            error: `Invalid gender: "${gender}". Must be "Male" or "Female"`,
             data: row
           });
-          console.log(`❌ Row ${index + 2} invalid gender:`, row.sex);
+          console.log(`❌ Row ${index + 2} invalid gender:`, gender);
           continue;
         }
 
         // Parse date with multiple format support
         let dateOfBirth;
         try {
-          // Try parsing different date formats
-          dateOfBirth = new Date(row.dateOfBirth);
+          dateOfBirth = new Date(dateOfBirthStr);
           if (isNaN(dateOfBirth.getTime())) {
             // Try MM/DD/YYYY format
-            const parts = row.dateOfBirth.split('/');
+            const parts = dateOfBirthStr.split('/');
             if (parts.length === 3) {
               dateOfBirth = new Date(parts[2], parts[0] - 1, parts[1]);
             }
             if (isNaN(dateOfBirth.getTime())) {
-              throw new Error('Invalid date format');
+              // Try DD-MM-YYYY format
+              const parts2 = dateOfBirthStr.split('-');
+              if (parts2.length === 3) {
+                dateOfBirth = new Date(parts2[2], parts2[1] - 1, parts2[0]);
+              }
+              if (isNaN(dateOfBirth.getTime())) {
+                throw new Error('Invalid date format');
+              }
             }
           }
         } catch (dateError) {
           errors.push({
             row: index + 2,
-            error: `Invalid date format: ${row.dateOfBirth}. Use YYYY-MM-DD or MM/DD/YYYY`,
+            error: `Invalid date format: "${dateOfBirthStr}". Use YYYY-MM-DD, MM/DD/YYYY, or DD-MM-YYYY`,
             data: row
           });
-          console.log(`❌ Row ${index + 2} date error:`, row.dateOfBirth);
+          console.log(`❌ Row ${index + 2} date error:`, dateOfBirthStr);
           continue;
         }
 
-        // Calculate age
+        // Calculate age automatically
         const today = new Date();
         let age = today.getFullYear() - dateOfBirth.getFullYear();
         const monthDiff = today.getMonth() - dateOfBirth.getMonth();
@@ -2617,20 +3506,25 @@ app.post("/guests/import", upload.single('csvFile'), async (req, res) => {
         }
 
         const guestData = {
-          lastName: row.lastName.trim(),
-          firstName: row.firstName.trim(),
-          middleName: row.middleName ? row.middleName.trim() : '',
-          extension: row.extension ? row.extension.trim() : '',
+          lastName: lastName,
+          firstName: firstName,
+          middleName: middleName,
+          extension: extension,
           dateOfBirth: dateOfBirth,
-          age: age.toString(),
-          sex: row.sex,
-          address: row.address.trim(),
-          contact: row.contact.trim(),
-          visitPurpose: row.visitPurpose.trim(),
+          age: age.toString(), // Auto-calculated
+          sex: gender, // ✅ MAPPED FROM CSV "Gender" TO DATABASE "sex"
+          address: address,
+          contact: contact,
+          visitPurpose: visitPurpose,
           status: 'approved'
         };
 
-        console.log(`✅ Row ${index + 2} processed successfully:`, guestData.firstName, guestData.lastName);
+        console.log(`✅ Row ${index + 2} processed successfully:`, 
+          guestData.firstName, guestData.lastName, 
+          `Gender: ${gender} → Sex: ${guestData.sex}`,
+          `Age: ${age}`,
+          `Visit Purpose: ${visitPurpose}`
+        );
         guests.push(guestData);
       } catch (rowError) {
         console.error(`❌ Error processing row ${index + 2}:`, rowError);
@@ -2674,6 +3568,8 @@ app.post("/guests/import", upload.single('csvFile'), async (req, res) => {
           timeOut: null,
           dateVisited: null,
           lastVisitDate: null,
+          isTimerActive: false,
+          visitApproved: false,
           dailyVisits: [],
           visitHistory: [],
           totalVisits: 0
@@ -2681,7 +3577,7 @@ app.post("/guests/import", upload.single('csvFile'), async (req, res) => {
 
         const savedGuest = await guest.save();
         importedGuests.push(savedGuest);
-        console.log(`✅ Saved guest: ${guestId} - ${guestData.firstName} ${guestData.lastName}`);
+        console.log(`✅ Saved guest: ${guestId} - ${guestData.firstName} ${guestData.lastName} (Sex: ${guestData.sex}, Age: ${guestData.age})`);
       } catch (error) {
         console.error(`❌ Error saving guest ${guestData.firstName} ${guestData.lastName}:`, error);
         errors.push({
@@ -2727,354 +3623,6 @@ app.post("/guests/import", upload.single('csvFile'), async (req, res) => {
       message: 'Failed to import guests', 
       error: error.message,
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
-  }
-});
-
-// Import visitors from CSV
-app.post("/visitors/import", upload.single('csvFile'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ message: 'No CSV file uploaded' });
-    }
-
-    const visitors = [];
-    const errors = [];
-
-    // Read and parse CSV file using Papa Parse
-    const fileContent = fs.readFileSync(req.file.path, 'utf8');
-    const results = Papa.parse(fileContent, {
-      header: true,
-      skipEmptyLines: true,
-      transformHeader: (header) => header.trim()
-    });
-
-    if (results.errors.length > 0) {
-      return res.status(400).json({ 
-        message: 'Invalid CSV format', 
-        errors: results.errors 
-      });
-    }
-
-    for (const [index, row] of results.data.entries()) {
-      try {
-        // Validate required fields for visitors
-        if (!row.lastName || !row.firstName || !row.sex || !row.dateOfBirth || 
-            !row.address || !row.contact || !row.prisonerId || !row.relationship) {
-          errors.push({
-            row: index + 2,
-            error: 'Missing required fields',
-            data: row
-          });
-          continue;
-        }
-
-        // Validate gender
-        if (!['Male', 'Female'].includes(row.sex)) {
-          errors.push({
-            row: index + 2,
-            error: 'Invalid gender. Must be Male or Female',
-            data: row
-          });
-          continue;
-        }
-
-        // Validate date
-        const dateOfBirth = new Date(row.dateOfBirth);
-        if (isNaN(dateOfBirth.getTime())) {
-          errors.push({
-            row: index + 2,
-            error: 'Invalid date format. Use YYYY-MM-DD',
-            data: row
-          });
-          continue;
-        }
-
-        // Verify prisoner exists
-        const inmate = await Inmate.findOne({ inmateCode: row.prisonerId });
-        if (!inmate) {
-          errors.push({
-            row: index + 2,
-            error: `Prisoner with ID ${row.prisonerId} not found`,
-            data: row
-          });
-          continue;
-        }
-
-        // Calculate age
-        const today = new Date();
-        let age = today.getFullYear() - dateOfBirth.getFullYear();
-        const monthDiff = today.getMonth() - dateOfBirth.getMonth();
-        if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dateOfBirth.getDate())) {
-          age--;
-        }
-
-        const visitorData = {
-          lastName: row.lastName.trim(),
-          firstName: row.firstName.trim(),
-          middleName: row.middleName ? row.middleName.trim() : '',
-          extension: row.extension ? row.extension.trim() : '',
-          dateOfBirth: dateOfBirth,
-          age: age.toString(),
-          sex: row.sex,
-          address: row.address.trim(),
-          contact: row.contact.trim(),
-          prisonerId: row.prisonerId.trim(),
-          relationship: row.relationship.trim(),
-          status: 'approved'
-        };
-
-        visitors.push(visitorData);
-      } catch (rowError) {
-        errors.push({
-          row: index + 2,
-          error: rowError.message,
-          data: row
-        });
-      }
-    }
-
-    // Insert visitors into database
-    const importedVisitors = [];
-    for (const visitorData of visitors) {
-      try {
-        // Generate unique visitor ID
-        const visitorSeq = await autoIncrement('visitorId');
-        const visitorId = `VIS${visitorSeq}`;
-
-        // Generate QR code
-        const qrData = {
-          id: visitorId,
-          lastName: visitorData.lastName,
-          firstName: visitorData.firstName,
-          middleName: visitorData.middleName,
-          extension: visitorData.extension,
-          prisonerId: visitorData.prisonerId,
-          type: 'visitor'
-        };
-        const qrCode = await generateQRCode(qrData);
-
-        const visitor = new Visitor({
-          ...visitorData,
-          id: visitorId,
-          qrCode: qrCode,
-          hasTimedIn: false,
-          hasTimedOut: false,
-          timeIn: null,
-          timeOut: null,
-          dateVisited: null,
-          lastVisitDate: null,
-          isTimerActive: false,
-          visitApproved: false,
-          dailyVisits: [],
-          visitHistory: [],
-          totalVisits: 0
-        });
-
-        const savedVisitor = await visitor.save();
-        importedVisitors.push(savedVisitor);
-      } catch (error) {
-        errors.push({
-          visitor: visitorData,
-          error: error.message
-        });
-      }
-    }
-
-    // Clean up uploaded file
-    fs.unlinkSync(req.file.path);
-
-    res.json({
-      message: 'Import completed',
-      imported: importedVisitors.length,
-      errors: errors,
-      totalProcessed: visitors.length
-    });
-
-  } catch (error) {
-    console.error('Import error:', error);
-    
-    // Clean up file on error
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-    
-    res.status(500).json({ 
-      message: 'Failed to import visitors', 
-      error: error.message 
-    });
-  }
-});
-
-// ======================
-// INMATES IMPORT ENDPOINTS - ADDED MISSING CODE
-// ======================
-
-// Import inmates from CSV
-app.post("/inmates/import", upload.single('csvFile'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ message: 'No CSV file uploaded' });
-    }
-
-    const inmates = [];
-    const errors = [];
-
-    // Read and parse CSV file using Papa Parse
-    const fileContent = fs.readFileSync(req.file.path, 'utf8');
-    const results = Papa.parse(fileContent, {
-      header: true,
-      skipEmptyLines: true,
-      transformHeader: (header) => header.trim()
-    });
-
-    if (results.errors.length > 0) {
-      return res.status(400).json({ 
-        message: 'Invalid CSV format', 
-        errors: results.errors 
-      });
-    }
-
-    for (const [index, row] of results.data.entries()) {
-      try {
-        // Validate required fields
-        if (!row.lastName || !row.firstName || !row.sex || !row.dateOfBirth || 
-            !row.address || !row.cellId || !row.crime) {
-          errors.push({
-            row: index + 2,
-            error: 'Missing required fields',
-            data: row
-          });
-          continue;
-        }
-
-        // Validate gender
-        if (!['Male', 'Female'].includes(row.sex)) {
-          errors.push({
-            row: index + 2,
-            error: 'Invalid gender. Must be Male or Female',
-            data: row
-          });
-          continue;
-        }
-
-        // Validate date
-        const dateOfBirth = new Date(row.dateOfBirth);
-        if (isNaN(dateOfBirth.getTime())) {
-          errors.push({
-            row: index + 2,
-            error: 'Invalid date format. Use YYYY-MM-DD',
-            data: row
-          });
-          continue;
-        }
-
-        // Validate other dates if provided
-        let dateFrom = null;
-        let dateTo = null;
-        
-        if (row.dateFrom && row.dateFrom.trim() !== '') {
-          dateFrom = new Date(row.dateFrom);
-          if (isNaN(dateFrom.getTime())) {
-            errors.push({
-              row: index + 2,
-              error: 'Invalid dateFrom format. Use YYYY-MM-DD',
-              data: row
-            });
-            continue;
-          }
-        }
-
-        if (row.dateTo && row.dateTo.trim() !== '') {
-          dateTo = new Date(row.dateTo);
-          if (isNaN(dateTo.getTime())) {
-            errors.push({
-              row: index + 2,
-              error: 'Invalid dateTo format. Use YYYY-MM-DD',
-              data: row
-            });
-            continue;
-          }
-        }
-
-        const inmateData = {
-          lastName: row.lastName.trim(),
-          firstName: row.firstName.trim(),
-          middleName: row.middleName ? row.middleName.trim() : '',
-          extension: row.extension ? row.extension.trim() : '',
-          sex: row.sex,
-          dateOfBirth: dateOfBirth,
-          address: row.address.trim(),
-          maritalStatus: row.maritalStatus ? row.maritalStatus.trim() : '',
-          eyeColor: row.eyeColor ? row.eyeColor.trim() : '',
-          complexion: row.complexion ? row.complexion.trim() : '',
-          cellId: row.cellId.trim(),
-          sentence: row.sentence ? row.sentence.trim() : '',
-          dateFrom: dateFrom,
-          dateTo: dateTo,
-          crime: row.crime.trim(),
-          emergencyName: row.emergencyName ? row.emergencyName.trim() : '',
-          emergencyContact: row.emergencyContact ? row.emergencyContact.trim() : '',
-          emergencyRelation: row.emergencyRelation ? row.emergencyRelation.trim() : '',
-          status: row.status && ['active', 'inactive', 'released', 'transferred'].includes(row.status) 
-            ? row.status 
-            : 'active'
-        };
-
-        inmates.push(inmateData);
-      } catch (rowError) {
-        errors.push({
-          row: index + 2,
-          error: rowError.message,
-          data: row
-        });
-      }
-    }
-
-    // Insert inmates into database
-    const importedInmates = [];
-    for (const inmateData of inmates) {
-      try {
-        // Generate unique inmate code
-        const inmateSeq = await autoIncrement('inmateCode');
-        const inmateCode = `INM${inmateSeq}`;
-
-        const inmate = new Inmate({
-          ...inmateData,
-          inmateCode: inmateCode
-        });
-
-        const savedInmate = await inmate.save();
-        importedInmates.push(savedInmate);
-      } catch (error) {
-        errors.push({
-          inmate: inmateData,
-          error: error.message
-        });
-      }
-    }
-
-    // Clean up uploaded file
-    fs.unlinkSync(req.file.path);
-
-    res.json({
-      message: 'Import completed',
-      imported: importedInmates.length,
-      errors: errors,
-      totalProcessed: inmates.length
-    });
-
-  } catch (error) {
-    console.error('Import error:', error);
-    
-    // Clean up file on error
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-    
-    res.status(500).json({ 
-      message: 'Failed to import inmates', 
-      error: error.message 
     });
   }
 });
@@ -3217,9 +3765,19 @@ app.post("/pending-visitors",
       const seq = await autoIncrement('pendingVisitorId');
       const id = `PEN${seq}`;
 
+      // Look up prisoner name from inmates collection
+      let prisonerName = '';
+      if (req.body.prisonerId) {
+        const inmate = await Inmate.findOne({ inmateCode: req.body.prisonerId });
+        if (inmate) {
+          prisonerName = inmate.fullName;
+        }
+      }
+
       const pendingVisitorData = {
         ...req.body,
         id,
+        prisonerName, // Store prisoner name in pending visitor
         dateOfBirth: req.body.dateOfBirth ? new Date(req.body.dateOfBirth) : null,
         status: 'pending'
       };
@@ -3271,27 +3829,39 @@ app.get("/pending-visitors", async (req, res) => {
   }
 });
 
-// GET SINGLE PENDING VISITOR
-app.get("/pending-visitors/:id", async (req, res) => {
+// GET PENDING VISITORS WITH PRISONER NAMES
+app.get("/pending-visitors-with-details", async (req, res) => {
   try {
-    const pendingVisitor = await PendingVisitor.findOne({ id: req.params.id });
-    if (!pendingVisitor) {
-      return res.status(404).json({ message: "Pending visitor not found" });
-    }
+    const pendingVisitors = await PendingVisitor.find({ status: 'pending' }).sort({ createdAt: -1 });
     
-    const pendingVisitorWithFullName = {
-      ...pendingVisitor.toObject(),
-      fullName: pendingVisitor.fullName
-    };
+    // You can optionally enrich with additional inmate data if needed
+    const pendingVisitorsWithDetails = await Promise.all(
+      pendingVisitors.map(async (pendingVisitor) => {
+        const visitorObj = pendingVisitor.toObject();
+        
+        // If you want to include additional inmate details
+        if (pendingVisitor.prisonerId) {
+          const inmate = await Inmate.findOne({ inmateCode: pendingVisitor.prisonerId });
+          if (inmate) {
+            visitorObj.inmateDetails = {
+              fullName: inmate.fullName,
+              // include other inmate fields if needed
+            };
+          }
+        }
+        
+        return visitorObj;
+      })
+    );
     
-    res.json(pendingVisitorWithFullName);
+    res.json(pendingVisitorsWithDetails);
   } catch (error) {
-    console.error("Error fetching pending visitor:", error);
+    console.error('Error fetching pending visitors with details:', error);
     res.status(500).json({ message: "Fetch failed", error: error.message });
   }
 });
 
-// APPROVE PENDING VISITOR
+// UPDATE APPROVE PENDING VISITOR ENDPOINT
 app.post("/pending-visitors/:id/approve", async (req, res) => {
   try {
     console.log('🔄 Approving pending visitor:', req.params.id);
@@ -3299,6 +3869,15 @@ app.post("/pending-visitors/:id/approve", async (req, res) => {
     const pendingVisitor = await PendingVisitor.findOne({ id: req.params.id });
     if (!pendingVisitor) {
       return res.status(404).json({ message: "Pending visitor not found" });
+    }
+
+    // Use the prisonerName from pending visitor, or look it up if not present
+    let prisonerName = pendingVisitor.prisonerName;
+    if (!prisonerName && pendingVisitor.prisonerId) {
+      const inmate = await Inmate.findOne({ inmateCode: pendingVisitor.prisonerId });
+      if (inmate) {
+        prisonerName = inmate.fullName;
+      }
     }
 
     // Generate QR code for the approved visitor
@@ -3329,6 +3908,7 @@ app.post("/pending-visitors/:id/approve", async (req, res) => {
       address: pendingVisitor.address,
       contact: pendingVisitor.contact,
       prisonerId: pendingVisitor.prisonerId,
+      prisonerName: prisonerName, // Use the prisoner name
       relationship: pendingVisitor.relationship,
       qrCode: qrCode,
       status: 'approved',

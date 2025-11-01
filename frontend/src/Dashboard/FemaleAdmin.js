@@ -10,7 +10,6 @@ import FemaleInmates from "./Components/Admin/FemaleInmates";
 import Crimes from "./Components/Admin/Crimes";
 import ReportsAnalytics from "./Components/Admin/ReportsAnalytics";
 import UserManagement from "./Components/Admin/UserManagement";
-import Maintenance from "./Components/Admin/Maintenance";
 import Logs from "./Components/Admin/Logs";
 import Guest from "./Components/Admin/Guest";
 import ScanQR from "./Components/Admin/ScanQr";
@@ -97,7 +96,6 @@ const FemaleAdmin = () => {
             { name: "Reports", icon: "bx bxs-report", path: "/femaleadmin/reports-analytics" },
             { name: "Pending Visitors", icon: "bx bxs-time-five", path: "/femaleadmin/pending-requests" },
             { name: "User Management", icon: "bx bxs-user-detail", path: "/femaleadmin/user-management" },
-            { name: "Maintenance", icon: "bx bxs-wrench", path: "/femaleadmin/maintenance" },
             { name: "System Logs", icon: "bx bxs-notepad", path: "/femaleadmin/logs" },
           ].map((link, index) => (
             <li key={index}>
@@ -123,7 +121,8 @@ const FemaleAdmin = () => {
       </div>
 
       <div className="content">
-        <nav>
+        {/* ADD fixed-nav CLASS HERE */}
+        <nav className="fixed-nav">
           <i 
             className="bx bx-menu toggle-sidebar" 
             onClick={() => setIsSidebarClosed(!isSidebarClosed)}
@@ -177,7 +176,8 @@ const FemaleAdmin = () => {
           </Dropdown>
         </nav>
 
-        <main>
+        {/* ADD main-content CLASS HERE */}
+        <main className="main-content">
           <Routes>
             <Route path="/" element={<Navigate to="/femaleadmin/dashboard" />} />
             <Route path="/dashboard" element={<DashboardHome />} />
@@ -189,7 +189,6 @@ const FemaleAdmin = () => {
             <Route path="/reports-analytics" element={<ReportsAnalytics />} />
             <Route path="/pending-requests" element={<PendingRequests />} />
             <Route path="/user-management" element={<UserManagement />} />
-            <Route path="/maintenance" element={<Maintenance />} />
             <Route path="/logs" element={<Logs />} />
           </Routes>
         </main>

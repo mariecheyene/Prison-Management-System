@@ -55,6 +55,30 @@ const FemaleInmates = () => {
     { value: 'status', label: 'Status' }
   ];
 
+  // Calculate sentence duration from dates
+  const calculateSentenceDuration = (dateFrom, dateTo) => {
+    if (!dateFrom || !dateTo) return '';
+    
+    const from = new Date(dateFrom);
+    const to = new Date(dateTo);
+    
+    // Check if dateTo is after dateFrom
+    if (to <= from) return 'Invalid dates';
+    
+    const diffTime = Math.abs(to - from);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const diffYears = Math.floor(diffDays / 365);
+    const diffMonths = Math.floor((diffDays % 365) / 30);
+    const remainingDays = diffDays % 30;
+
+    let sentenceParts = [];
+    if (diffYears > 0) sentenceParts.push(`${diffYears} year${diffYears > 1 ? 's' : ''}`);
+    if (diffMonths > 0) sentenceParts.push(`${diffMonths} month${diffMonths > 1 ? 's' : ''}`);
+    if (remainingDays > 0) sentenceParts.push(`${remainingDays} day${remainingDays > 1 ? 's' : ''}`);
+    
+    return sentenceParts.length > 0 ? `${sentenceParts.join(' ')} imprisonment` : '';
+  };
+
   useEffect(() => {
     fetchInmates();
     fetchCrimes();
@@ -220,6 +244,22 @@ const FemaleInmates = () => {
       ...prev,
       [name]: value
     }));
+
+    // Auto-calculate sentence when dateFrom or dateTo changes
+    if (name === 'dateFrom' || name === 'dateTo') {
+      const dateFrom = name === 'dateFrom' ? value : formData.dateFrom;
+      const dateTo = name === 'dateTo' ? value : formData.dateTo;
+      
+      if (dateFrom && dateTo) {
+        const calculatedSentence = calculateSentenceDuration(dateFrom, dateTo);
+        if (calculatedSentence && calculatedSentence !== 'Invalid dates') {
+          setFormData(prev => ({
+            ...prev,
+            sentence: calculatedSentence
+          }));
+        }
+      }
+    }
   };
 
   const handleCrimeSearchChange = (e) => {
@@ -267,6 +307,17 @@ const FemaleInmates = () => {
       toast.error('Please fill in all required fields');
       setIsLoading(false);
       return;
+    }
+
+    // Validate dates
+    if (formData.dateFrom && formData.dateTo) {
+      const from = new Date(formData.dateFrom);
+      const to = new Date(formData.dateTo);
+      if (to <= from) {
+        toast.error('Date To must be after Date From');
+        setIsLoading(false);
+        return;
+      }
     }
 
     try {
@@ -363,12 +414,37 @@ const FemaleInmates = () => {
           'Content-Type': 'multipart/form-data'
         }
       });
-      toast.success(response.data.message);
+      
+      console.log('📊 Full import response:', response);
+      console.log('📊 Response data:', response.data);
+      
+      // ✅ FIX: Use response.data.imported instead of response.imported
+      if (response.data.imported > 0) {
+        toast.success(`Successfully imported ${response.data.imported} female inmate${response.data.imported !== 1 ? 's' : ''}`);
+      } else {
+        toast.warning(`No female inmates imported. ${response.data.errors?.length || 0} errors found.`);
+      }
+      
+      // Show detailed errors if any
+      if (response.data.errors && response.data.errors.length > 0) {
+        console.error('Import errors:', response.data.errors);
+        response.data.errors.forEach((error, index) => {
+          if (index < 5) {
+            toast.error(`Row ${error.row}: ${error.error}`);
+          }
+        });
+        if (response.data.errors.length > 5) {
+          toast.error(`... and ${response.data.errors.length - 5} more errors`);
+        }
+      }
+      
       setShowUploadModal(false);
       setCsvFile(null);
-      fetchInmates();
+      fetchInmates(); // Refresh the inmate list
+      
     } catch (error) {
-      console.error('Error uploading CSV:', error);
+      console.error('❌ Error uploading CSV:', error);
+      console.error('Error response:', error.response?.data);
       toast.error(error.response?.data?.message || 'Failed to upload CSV');
     } finally {
       setIsLoading(false);
@@ -1050,7 +1126,14 @@ const FemaleInmates = () => {
             <Row>
               <Col md={6}>
                 <Form.Group className="mb-3">
-                  <Form.Label>Sentence</Form.Label>
+                  <Form.Label>
+                    Sentence 
+                    {formData.dateFrom && formData.dateTo && (
+                      <Badge bg="success" className="ms-2" style={{ fontSize: '0.6rem' }}>
+                        Auto-filled
+                      </Badge>
+                    )}
+                  </Form.Label>
                   <Form.Control
                     type="text"
                     name="sentence"
@@ -1058,6 +1141,12 @@ const FemaleInmates = () => {
                     onChange={handleInputChange}
                     placeholder="e.g., 5 years imprisonment"
                   />
+                  <Form.Text className="text-muted">
+                    {formData.dateFrom && formData.dateTo 
+                      ? `Auto-calculated: ${calculateSentenceDuration(formData.dateFrom, formData.dateTo)}`
+                      : 'Enter manually or set Date From/To to auto-calculate'
+                    }
+                  </Form.Text>
                 </Form.Group>
               </Col>
               <Col md={6}>
@@ -1329,11 +1418,38 @@ const FemaleInmates = () => {
       </Modal>
 
       {/* CSV Upload Modal */}
-      <Modal show={showUploadModal} onHide={() => setShowUploadModal(false)}>
+      <Modal show={showUploadModal} onHide={() => setShowUploadModal(false)} size="lg" centered>
         <Modal.Header closeButton>
           <Modal.Title>Import Female Inmates from CSV</Modal.Title>
         </Modal.Header>
         <Modal.Body>
+          <Alert variant="info" className="mb-4">
+            <strong>CSV Format Requirements:</strong>
+            <br />
+            Your CSV file should include these columns in the header row:
+            <ul className="mb-0 mt-2">
+              <li><strong>Last Name</strong> (required)</li>
+              <li><strong>First Name</strong> (required)</li>
+              <li><strong>Middle Name</strong> (optional)</li>
+              <li><strong>Extension</strong> (optional - Jr, Sr, III)</li>
+              <li><strong>Gender</strong> (required - Must be "Female")</li>
+              <li><strong>Date of Birth</strong> (required - YYYY-MM-DD or MM/DD/YYYY)</li>
+              <li><strong>Address</strong> (required)</li>
+              <li><strong>Marital Status</strong> (optional - Single, Married, Divorced, Widowed, Separated)</li>
+              <li><strong>Eye Color</strong> (optional)</li>
+              <li><strong>Complexion</strong> (optional)</li>
+              <li><strong>Cell ID</strong> (required)</li>
+              <li><strong>Sentence</strong> (optional - will auto-calculate if dates provided)</li>
+              <li><strong>Date From</strong> (optional - YYYY-MM-DD or MM/DD/YYYY)</li>
+              <li><strong>Date To</strong> (optional - YYYY-MM-DD or MM/DD/YYYY)</li>
+              <li><strong>Crime</strong> (required)</li>
+              <li><strong>Emergency Name</strong> (optional)</li>
+              <li><strong>Emergency Contact</strong> (optional)</li>
+              <li><strong>Emergency Relation</strong> (optional)</li>
+              <li><strong>Status</strong> (required - active, inactive, released, transferred)</li>
+            </ul>
+          </Alert>
+
           <Form.Group>
             <Form.Label>Select CSV File</Form.Label>
             <Form.Control
@@ -1342,15 +1458,30 @@ const FemaleInmates = () => {
               onChange={handleFileUpload}
             />
             <Form.Text className="text-muted">
-              CSV should include columns: lastName, firstName, middleName, extension, sex, dateOfBirth, address, maritalStatus, eyeColor, complexion, cellId, sentence, dateFrom, dateTo, crime, emergencyName, emergencyContact, emergencyRelation, status
+              CSV file should have headers matching the format above. File will be processed immediately after selection.
             </Form.Text>
           </Form.Group>
+
+          {csvFile && (
+            <Alert variant="success" className="mt-3">
+              <strong>File selected:</strong> {csvFile.name}
+              <br />
+              <small>Ready to upload. Click "Upload CSV" to proceed.</small>
+            </Alert>
+          )}
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowUploadModal(false)}>
+          <Button variant="secondary" onClick={() => {
+            setShowUploadModal(false);
+            setCsvFile(null);
+          }}>
             Cancel
           </Button>
-          <Button variant="dark" onClick={handleCsvUpload} disabled={!csvFile || isLoading}>
+          <Button 
+            variant="dark" 
+            onClick={handleCsvUpload} 
+            disabled={!csvFile || isLoading}
+          >
             {isLoading ? <Spinner size="sm" /> : 'Upload CSV'}
           </Button>
         </Modal.Footer>

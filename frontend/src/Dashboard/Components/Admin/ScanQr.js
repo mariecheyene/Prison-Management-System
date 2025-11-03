@@ -1171,7 +1171,13 @@ const ScanQR = ({ show, onHide, onVisitUpdate }) => {
         </Modal.Footer>
       </Modal>
 
-      <Modal show={showPersonModal} onHide={handleClosePersonModal} size="xl" centered>
+ <Modal 
+  show={showPersonModal} 
+  onHide={handleClosePersonModal} 
+  centered
+  size="xl"
+  dialogClassName="modal-lower-position"
+>
         <Modal.Header closeButton className={scannedPerson?.isBanned ? "bg-danger text-white" : ""}>
           <Modal.Title>
             {scannedPerson?.personType === 'guest' ? 'Guest' : 'Visitor'} Scan Details - {scannedPerson?.id || 'Unknown'} 

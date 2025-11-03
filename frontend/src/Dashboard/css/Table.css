@@ -66,3 +66,34 @@
 .modal-lower {
   margin-top: 10vh;
 }
+
+/* Lower modal position */
+.modal-lower-position {
+  max-width: 94% !important;
+  width: 94% !important;
+  margin-top: 5vh !important; /* Push modal down from top */
+  margin-bottom: 5vh !important;
+  transform: none !important;
+}
+
+/* Ensure modal is visible */
+.modal-content {
+  max-height: 90vh;
+  overflow: hidden;
+}
+
+.modal-body {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+@media (max-height: 800px) {
+  .modal-lower-position {
+    margin-top: 2vh !important;
+    margin-bottom: 2vh !important;
+  }
+  
+  .modal-body {
+    max-height: 50vh;
+  }
+}

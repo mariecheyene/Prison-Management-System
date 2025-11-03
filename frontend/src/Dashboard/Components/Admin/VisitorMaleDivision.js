@@ -1289,41 +1289,54 @@ const VisitorMaleDivision = () => {
         </Modal.Footer>
       </Modal>
       
-      {/* QR Code Modal */}
-      <Modal show={showQRModal} onHide={() => setShowQRModal(false)} size="sm">
+            {/* QR Code Modal */}
+      <Modal show={showQRModal} onHide={() => setShowQRModal(false)} centered>
         <Modal.Header closeButton>
           <Modal.Title>Visitor QR Code - {selectedQRVisitor?.id}</Modal.Title>
         </Modal.Header>
         <Modal.Body className="text-center">
-          {selectedQRVisitor && (
+          {selectedQRVisitor ? (
             <>
               {selectedQRVisitor.qrCode ? (
                 <>
                   <img 
                     src={selectedQRVisitor.qrCode} 
                     alt="Visitor QR Code" 
-                    style={{ maxWidth: '100%', height: 'auto' }}
+                    style={{ 
+                      maxWidth: '100%', 
+                      height: 'auto',
+                      border: '1px solid #ddd',
+                      borderRadius: '5px'
+                    }}
                   />
-                  <p className="mt-3"><strong>{selectedQRVisitor.fullName}</strong></p>
-                  <p className="text-muted">Visitor ID: {selectedQRVisitor.id}</p>
-                  <p className="text-muted">Prisoner: {selectedQRVisitor.prisonerName || selectedQRVisitor.prisonerId}</p>
+                  <div className="mt-3">
+                    <p><strong>Visitor:</strong> {selectedQRVisitor.fullName}</p>
+                    <p><strong>Inmate ID:</strong> {selectedQRVisitor.prisonerId}</p>
+                    <p><strong>Relationship:</strong> {selectedQRVisitor.relationship}</p>
+                  </div>
                 </>
               ) : (
                 <Alert variant="warning">
-                  QR code not generated yet. Please wait or regenerate QR code.
+                  QR code not generated for this visitor.
                 </Alert>
               )}
             </>
+          ) : (
+            <Alert variant="danger">
+              No visitor selected.
+            </Alert>
           )}
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={() => setShowQRModal(false)}>
             Close
           </Button>
-          <Button variant="dark" onClick={downloadQRCode} disabled={!selectedQRVisitor?.qrCode}>
-            <Download size={16} className="me-1" />
-            Download QR
-          </Button>
+          {selectedQRVisitor?.qrCode && (
+            <Button variant="dark" onClick={downloadQRCode}>
+              <Download size={16} className="me-1" />
+              Download QR
+            </Button>
+          )}
         </Modal.Footer>
       </Modal>
 

@@ -367,10 +367,8 @@ const Guest = () => {
     }
   };
 
-  // Custom print functionality like in Visitor.js
   const printGuestDetails = () => {
   const printWindow = window.open('', '_blank');
-  const timeStatus = getTimeStatus(selectedGuest);
   
   printWindow.document.write(`
     <html>
@@ -436,12 +434,6 @@ const Guest = () => {
           .full-width {
             grid-column: 1 / -1;
           }
-          .violation { 
-            background-color: #ffe6e6; 
-            border-left: 4px solid #dc3545;
-            padding: 10px;
-            margin: 10px 0;
-          }
           .qr-code {
             text-align: center;
             margin: 20px 0;
@@ -478,24 +470,6 @@ const Guest = () => {
             margin-bottom: 10px;
             color: #2c3e50;
           }
-          .time-status {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            color: white;
-            font-weight: bold;
-          }
-          .status-success { background-color: #28a745; }
-          .status-info { background-color: #17a2b8; }
-          .status-secondary { background-color: #6c757d; }
-          .status-badge {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            color: white;
-            font-weight: bold;
-            margin-left: 5px;
-          }
           @media print {
             body { margin: 10px; }
             .section { border: none; }
@@ -515,34 +489,6 @@ const Guest = () => {
         </div>
         
         ${selectedGuest ? `
-          <div class="section">
-            <h3>Time Tracking Information</h3>
-            <div class="info-grid">
-              <div class="info-item">
-                <span class="label">Visit Date:</span> ${selectedGuest.dateVisited ? new Date(selectedGuest.dateVisited).toLocaleDateString() : 'Not yet visited'}
-              </div>
-              <div class="info-item">
-                <span class="label">Time In:</span> ${selectedGuest.timeIn || 'Not recorded'}
-              </div>
-              <div class="info-item">
-                <span class="label">Time Out:</span> ${selectedGuest.timeOut || 'Not recorded'}
-              </div>
-              <div class="info-item">
-                <span class="label">Time Status:</span> 
-                <span class="time-status status-${timeStatus.variant}">${timeStatus.text}</span>
-              </div>
-              <div class="info-item">
-                <span class="label">Guest Status:</span> 
-                <span class="status-badge" style="background-color: ${
-                  selectedGuest.status === 'approved' ? '#28a745' :
-                  selectedGuest.status === 'completed' ? '#17a2b8' :
-                  selectedGuest.status === 'pending' ? '#ffc107' :
-                  selectedGuest.status === 'rejected' ? '#dc3545' : '#6c757d'
-                }">${selectedGuest.status?.toUpperCase() || 'APPROVED'}</span>
-              </div>
-            </div>
-          </div>
-
           <div class="section">
             <h3>Identification</h3>
             <div class="photo-container">
@@ -595,32 +541,8 @@ const Guest = () => {
               <div class="info-item full-width">
                 <span class="label">Visit Purpose:</span> ${selectedGuest.visitPurpose}
               </div>
-              ${selectedGuest.approvedBy ? `
-              <div class="info-item">
-                <span class="label">Approved By:</span> ${selectedGuest.approvedBy}
-              </div>
-              ` : ''}
-              ${selectedGuest.rejectedBy ? `
-              <div class="info-item">
-                <span class="label">Rejected By:</span> ${selectedGuest.rejectedBy}
-              </div>
-              ` : ''}
             </div>
           </div>
-
-          ${selectedGuest.violationType ? `
-          <div class="section">
-            <h3>Violation Information</h3>
-            <div class="violation">
-              <div class="info-item">
-                <span class="label">Violation Type:</span> ${selectedGuest.violationType}
-              </div>
-              <div class="info-item full-width">
-                <span class="label">Violation Details:</span> ${selectedGuest.violationDetails || 'No violation data'}
-              </div>
-            </div>
-          </div>
-          ` : ''}
 
           <div class="section">
             <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
@@ -651,7 +573,7 @@ const Guest = () => {
             👤 Guests Management
           </h2>
           <Badge bg="info" className="mb-2">
-            Admin Access
+            Staff Access
           </Badge>
         </div>
         <div className="d-flex gap-2">
@@ -722,7 +644,7 @@ const Guest = () => {
               <th>Full Name</th>
               <th>Gender</th>
               <th>Visit Purpose</th>
-              <th>Status</th>
+              {/* STATUS COLUMN REMOVED */}
               <th>Last Visit Date</th>
               <th>Time Status</th>
               <th>Violation Type</th>
@@ -736,15 +658,11 @@ const Guest = () => {
                 <td>{guest.fullName}</td>
                 <td>{guest.sex}</td>
                 <td>{guest.visitPurpose}</td>
+                {/* STATUS BADGE REMOVED */}
                 <td>
-                  <Badge bg={getStatusVariant(guest)}>
-                    {guest.status?.toUpperCase() || 'APPROVED'}
-                  </Badge>
-                </td>
-                <td>
-                  {guest.dateVisited ? (
+                  {guest.lastVisitDate ? (
                     <Badge bg="info">
-                      {formatDate(guest.dateVisited)}
+                      {formatDate(guest.lastVisitDate)}
                     </Badge>
                   ) : (
                     <Badge bg="secondary">Not visited</Badge>
@@ -964,177 +882,152 @@ const Guest = () => {
         </Form>
       </Modal>
 
-      {/* View Modal */}
-      <Modal show={showViewModal} onHide={() => setShowViewModal(false)} size="lg">
-        <Modal.Header closeButton>
-          <Modal.Title>Guest Details - {selectedGuest?.id}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          {selectedGuest && (
-            <Row>
-              <Col md={12}>
-                <Card className="mb-4">
-                  <Card.Header>
-                    <strong>Time Tracking Information</strong>
-                  </Card.Header>
-                  <Card.Body>
-                    <Row>
-                      <Col md={6}>
-                        <p><strong>Visit Date:</strong> {selectedGuest.dateVisited ? new Date(selectedGuest.dateVisited).toLocaleDateString() : 'Not yet visited'}</p>
-                        <p><strong>Time In:</strong> {selectedGuest.timeIn || 'Not recorded'}</p>
-                      </Col>
-                      <Col md={6}>
-                        <p><strong>Time Out:</strong> {selectedGuest.timeOut || 'Not recorded'}</p>
-                        <p><strong>Time Status:</strong> <Badge bg={getTimeStatus(selectedGuest).variant}>{getTimeStatus(selectedGuest).text}</Badge></p>
-                        <p><strong>Guest Status:</strong> <Badge bg={getStatusVariant(selectedGuest)}>{selectedGuest.status?.toUpperCase() || 'APPROVED'}</Badge></p>
-                      </Col>
-                    </Row>
-                  </Card.Body>
-                </Card>
-              </Col>
 
-              <Col md={12}>
-                <Card className="mb-4">
-                  <Card.Header>
-                    <strong>QR Code</strong>
-                  </Card.Header>
-                  <Card.Body className="text-center">
-                    {selectedGuest.qrCode ? (
-                      <img 
-                        src={selectedGuest.qrCode} 
-                        alt="Guest QR Code" 
-                        style={{ 
-                          maxWidth: '300px', 
-                          height: 'auto',
-                          border: '1px solid #ddd',
-                          borderRadius: '5px'
-                        }}
-                      />
-                    ) : (
-                      <Alert variant="warning">
-                        QR code not generated yet.
-                      </Alert>
-                    )}
-                  </Card.Body>
-                </Card>
-              </Col>
-              
-              <Col md={6}>
-                <Card className="mb-3">
-                  <Card.Header>
-                    <strong>Guest Information</strong>
-                  </Card.Header>
-                  <Card.Body>
-                    {selectedGuest.photo && (
-                      <div className="text-center mb-3">
-                        <img 
-                          src={
-                            selectedGuest.photo.startsWith('http') 
-                              ? selectedGuest.photo 
-                              : `http://localhost:5000/uploads/${selectedGuest.photo}`
-                          }
-                          alt="Guest"
-                          style={{ 
-                            maxWidth: '200px', 
-                            maxHeight: '200px', 
-                            objectFit: 'cover',
-                            borderRadius: '5px'
-                          }}
-                          onError={(e) => {
-                            e.target.style.display = 'none';
-                          }}
-                        />
-                      </div>
-                    )}
-                    <p><strong>Full Name:</strong> {selectedGuest.fullName}</p>
-                    <p><strong>Gender:</strong> {selectedGuest.sex}</p>
-                    <p><strong>Date of Birth:</strong> {new Date(selectedGuest.dateOfBirth).toLocaleDateString()}</p>
-                    <p><strong>Age:</strong> {calculateAge(selectedGuest.dateOfBirth)}</p>
-                    <p><strong>Address:</strong> {selectedGuest.address}</p>
-                    <p><strong>Contact:</strong> {selectedGuest.contact || 'N/A'}</p>
-                  </Card.Body>
-                </Card>
-              </Col>
-              <Col md={6}>
-                <Card className="mb-3">
-                  <Card.Header>
-                    <strong>Visit Details</strong>
-                  </Card.Header>
-                  <Card.Body>
-                    <p><strong>Visit Purpose:</strong> {selectedGuest.visitPurpose}</p>
-                    <p><strong>Status:</strong> <Badge bg={getStatusVariant(selectedGuest)}>{selectedGuest.status?.toUpperCase() || 'APPROVED'}</Badge></p>
-                    {selectedGuest.approvedBy && (
-                      <p><strong>Approved By:</strong> {selectedGuest.approvedBy}</p>
-                    )}
-                    {selectedGuest.rejectedBy && (
-                      <p><strong>Rejected By:</strong> {selectedGuest.rejectedBy}</p>
-                    )}
-                  </Card.Body>
-                </Card>
+{/* View Modal */}
+<Modal show={showViewModal} onHide={() => setShowViewModal(false)} size="lg">
+  <Modal.Header closeButton>
+    <Modal.Title>Guest Details - {selectedGuest?.id}</Modal.Title>
+  </Modal.Header>
+  <Modal.Body>
+    {selectedGuest && (
+      <Row>
+        {/* QR Code Section */}
+        <Col md={12}>
+          <Card className="mb-4">
+            <Card.Header>
+              <strong>QR Code</strong>
+            </Card.Header>
+            <Card.Body className="text-center">
+              {selectedGuest.qrCode ? (
+                <img 
+                  src={selectedGuest.qrCode} 
+                  alt="Guest QR Code" 
+                  style={{ 
+                    maxWidth: '300px', 
+                    height: 'auto',
+                    border: '1px solid #ddd',
+                    borderRadius: '5px'
+                  }}
+                />
+              ) : (
+                <Alert variant="warning">
+                  QR code not generated yet.
+                </Alert>
+              )}
+            </Card.Body>
+          </Card>
+        </Col>
+        
+        {/* Guest Information */}
+        <Col md={6}>
+          <Card className="mb-3">
+            <Card.Header>
+              <strong>Guest Information</strong>
+            </Card.Header>
+            <Card.Body>
+              {selectedGuest.photo && (
+                <div className="text-center mb-3">
+                  <img 
+                    src={
+                      selectedGuest.photo.startsWith('http') 
+                        ? selectedGuest.photo 
+                        : `http://localhost:5000/uploads/${selectedGuest.photo}`
+                    }
+                    alt="Guest"
+                    style={{ 
+                      maxWidth: '200px', 
+                      maxHeight: '200px', 
+                      objectFit: 'cover',
+                      borderRadius: '5px'
+                    }}
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                    }}
+                  />
+                </div>
+              )}
+              <p><strong>Full Name:</strong> {selectedGuest.fullName}</p>
+              <p><strong>Gender:</strong> {selectedGuest.sex}</p>
+              <p><strong>Date of Birth:</strong> {new Date(selectedGuest.dateOfBirth).toLocaleDateString()}</p>
+              <p><strong>Age:</strong> {calculateAge(selectedGuest.dateOfBirth)}</p>
+              <p><strong>Address:</strong> {selectedGuest.address}</p>
+              <p><strong>Contact:</strong> {selectedGuest.contact || 'N/A'}</p>
+            </Card.Body>
+          </Card>
+        </Col>
 
-                {selectedGuest.violationType && (
-                  <Card className="mb-3 border-danger">
-                    <Card.Header className="bg-danger text-white">
-                      <strong>Violation Information</strong>
-                    </Card.Header>
-                    <Card.Body>
-                      <p><strong>Violation Type:</strong> {selectedGuest.violationType}</p>
-                      <p><strong>Violation Details:</strong> {selectedGuest.violationDetails || 'No violation data'}</p>
-                    </Card.Body>
-                  </Card>
-                )}
-              </Col>
-            </Row>
-          )}
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowViewModal(false)}>
-            Close
-          </Button>
-          <Button variant="dark" onClick={printGuestDetails}>
-            <Printer size={16} className="me-1" />
-            Print
-          </Button>
-        </Modal.Footer>
-      </Modal>
+        {/* Visit Details */}
+        <Col md={6}>
+          <Card className="mb-3">
+            <Card.Header>
+              <strong>Visit Details</strong>
+            </Card.Header>
+            <Card.Body>
+              <p><strong>Visit Purpose:</strong> {selectedGuest.visitPurpose}</p>
+            </Card.Body>
+          </Card>
+        </Col>
+      </Row>
+    )}
+  </Modal.Body>
+  <Modal.Footer>
+    <Button variant="secondary" onClick={() => setShowViewModal(false)}>
+      Close
+    </Button>
+    <Button variant="dark" onClick={printGuestDetails}>
+      <Printer size={16} className="me-1" />
+      Print
+    </Button>
+  </Modal.Footer>
+</Modal>
 
-      {/* QR Code Modal */}
-      <Modal show={showQRModal} onHide={() => setShowQRModal(false)} size="sm">
+            {/* QR Code Modal */}
+      <Modal show={showQRModal} onHide={() => setShowQRModal(false)} centered>
         <Modal.Header closeButton>
           <Modal.Title>Guest QR Code - {selectedQRGuest?.id}</Modal.Title>
         </Modal.Header>
         <Modal.Body className="text-center">
-          {selectedQRGuest && (
+          {selectedQRGuest ? (
             <>
               {selectedQRGuest.qrCode ? (
                 <>
                   <img 
                     src={selectedQRGuest.qrCode} 
                     alt="Guest QR Code" 
-                    style={{ maxWidth: '100%', height: 'auto' }}
+                    style={{ 
+                      maxWidth: '100%', 
+                      height: 'auto',
+                      border: '1px solid #ddd',
+                      borderRadius: '5px'
+                    }}
                   />
-                  <p className="mt-3"><strong>{selectedQRGuest.fullName}</strong></p>
-                  <p className="text-muted">Guest ID: {selectedQRGuest.id}</p>
-                  <Badge bg={getStatusVariant(selectedQRGuest)}>
-                    Status: {selectedQRGuest.status?.toUpperCase() || 'APPROVED'}
-                  </Badge>
+                  <div className="mt-3">
+                    <p><strong>Guest:</strong> {selectedQRGuest.fullName}</p>
+                    <p><strong>Visit Purpose:</strong> {selectedQRGuest.visitPurpose}</p>
+                  </div>
                 </>
               ) : (
                 <Alert variant="warning">
-                  QR code not generated yet. Please wait or regenerate QR code.
+                  QR code not generated for this guest.
                 </Alert>
               )}
             </>
+          ) : (
+            <Alert variant="danger">
+              No guest selected.
+            </Alert>
           )}
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={() => setShowQRModal(false)}>
             Close
           </Button>
-          <Button variant="dark" onClick={downloadQRCode} disabled={!selectedQRGuest?.qrCode}>
-            <Download size={16} className="me-1" />
-            Download QR
-          </Button>
+          {selectedQRGuest?.qrCode && (
+            <Button variant="dark" onClick={downloadQRCode}>
+              <Download size={16} className="me-1" />
+              Download QR
+            </Button>
+          )}
         </Modal.Footer>
       </Modal>
 
